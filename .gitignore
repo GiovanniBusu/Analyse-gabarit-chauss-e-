@@ -6,6 +6,10 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller build output (backend/desktop_app.spec)
+backend/build/
+backend/dist/
+
 # Node / frontend
 node_modules/
 dist/

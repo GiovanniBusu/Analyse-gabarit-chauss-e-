@@ -89,11 +89,42 @@ légende que le classeur Excel de référence : Entrée manuelle / Menu déroula
 → **Comparatif** → **Seuils** (éditables) → **Export** (Excel, DXF avec
 options Points/Polylignes et calques à inclure).
 
-## Déploiement (lien web gratuit, sans serveur à gérer)
+## Distribution : exécutable Windows autonome (recommandé)
 
-Le dépôt contient un `Dockerfile` (frontend compilé + backend Python dans une
-seule image) et un `render.yaml` (Render Blueprint) pour un déploiement en
-un clic sur [Render](https://render.com), plan **Free** :
+Pas de serveur, pas de compte à créer, pas d'installateur (donc pas de
+blocage IT) : un `.exe` portable, construit automatiquement par GitHub
+Actions et publié sur la page **Releases** du dépôt.
+
+1. Pousser un tag de version déclenche la construction :
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+2. GitHub Actions (`.github/workflows/build-windows-exe.yml`) compile le
+   frontend, empaquette le backend (FastAPI + `ezdxf` + `ifcopenshell`) avec
+   PyInstaller en un seul fichier `AnalyseGabaritChaussee.exe`, et l'attache
+   automatiquement à une Release GitHub.
+3. Chacun télécharge ce `.exe` depuis la page Releases et le partage comme un
+   simple lien de téléchargement à ses collègues.
+4. Double-clic → une fenêtre console s'ouvre (moteur en cours d'exécution) et
+   le navigateur par défaut s'ouvre automatiquement sur l'outil. Fermer la
+   fenêtre arrête l'outil. Rien n'est installé sur la machine.
+
+**Point d'attention** : un `.exe` non signé numériquement peut déclencher un
+avertissement Windows SmartScreen ("Windows a protégé votre ordinateur") ou
+être mis en quarantaine par un antivirus d'entreprise strict — c'est un faux
+positif classique pour tout exécutable empaqueté par PyInstaller, pas un
+signe de problème réel. La signature de code a un coût et nécessite une
+identité d'éditeur ; elle n'est pas mise en place ici pour rester à coût
+nul. Si ton service informatique bloque malgré tout ce fichier, il faudra
+soit une exception IT, soit passer à l'option d'hébergement web ci-dessous.
+
+## Alternative : lien web hébergé (Render, gratuit)
+
+Le dépôt contient aussi un `Dockerfile` (frontend compilé + backend Python
+dans une seule image) et un `render.yaml` (Render Blueprint) pour un
+déploiement en un clic sur [Render](https://render.com), plan **Free**, si
+un vrai lien web (plutôt qu'un fichier à télécharger) est préférable :
 
 1. Crée un compte Render (gratuit).
 2. Dashboard → **New +** → **Blueprint** → connecte le repo GitHub
