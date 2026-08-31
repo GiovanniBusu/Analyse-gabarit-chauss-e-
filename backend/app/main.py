@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 
@@ -18,3 +21,12 @@ app.include_router(router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# Single-service deployment: the built frontend (frontend/dist) is served
+# from the same origin as the API, so no cross-origin config is needed in
+# production. Mounted last and only if present, so `uvicorn --reload` still
+# works locally without requiring a frontend build.
+_frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")

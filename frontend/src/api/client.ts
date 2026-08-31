@@ -1,7 +1,11 @@
 import type { Band, ComparisonRow, RatioResult, Side, Threshold, UploadRole } from "../types/domain";
 import type { ElementType } from "../types/domain";
 
-const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
+// Defaults to a same-origin relative path: in production the backend serves
+// this built frontend itself (single Render service, no CORS needed). Local
+// dev with two separate servers (`npm run dev` + `uvicorn`) overrides this
+// via .env (see .env.example).
+const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init);

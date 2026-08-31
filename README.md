@@ -89,7 +89,26 @@ légende que le classeur Excel de référence : Entrée manuelle / Menu déroula
 → **Comparatif** → **Seuils** (éditables) → **Export** (Excel, DXF avec
 options Points/Polylignes et calques à inclure).
 
-## Démarrage
+## Déploiement (lien web gratuit, sans serveur à gérer)
+
+Le dépôt contient un `Dockerfile` (frontend compilé + backend Python dans une
+seule image) et un `render.yaml` (Render Blueprint) pour un déploiement en
+un clic sur [Render](https://render.com), plan **Free** :
+
+1. Crée un compte Render (gratuit).
+2. Dashboard → **New +** → **Blueprint** → connecte le repo GitHub
+   `Analyse-gabarit-chauss-e-`, branche `claude/road-analysis-dxf-ifc-abbi3t`
+   (ou `main` une fois mergée).
+3. Render détecte `render.yaml` et build/déploie automatiquement.
+4. Tu obtiens une URL publique unique (`https://analyse-gabarit-chaussee.onrender.com`)
+   qui sert à la fois l'application et l'API — aucune configuration
+   supplémentaire (le backend sert le frontend compilé sur la même origine).
+
+Le plan Free de Render met le service en veille après 15 min d'inactivité ;
+le premier chargement après une veille prend ~30-50s le temps qu'il redémarre
+— normal, gratuit, pas de carte bancaire requise.
+
+## Démarrage en local (développement)
 
 ### Backend
 
