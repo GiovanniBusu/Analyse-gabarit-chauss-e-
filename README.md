@@ -5,6 +5,11 @@ Outil web pour automatiser l'analyse de largeurs de chaussée et de BAU
 DXF ou IFC (cadwork/Lexocad), avec comparatif existant / projet et export
 Excel (formules live) et DXF (calques structurés).
 
+**Tout tourne dans le navigateur** (DXF et IFC parsés côté client, `web-ifc`
+en WASM pour l'IFC) — aucun serveur, aucun compte à créer, déployé
+gratuitement sur GitHub Pages. Une implémentation backend Python équivalente
+existe aussi dans `backend/` (voir [Alternative backend](#alternative--backend-python--api-rest)).
+
 ## Principe
 
 L'utilisateur charge **3 fichiers obligatoires** (chacun DXF ou IFC) :
@@ -21,127 +26,148 @@ manuellement toute classification erronée via un menu déroulant — sans avoir
 à retoucher le fichier source. Les ratios de conformité et le comparatif
 existant/projet se recalculent immédiatement après chaque correction.
 
-## Architecture
+## Distribution : GitHub Pages (recommandé, gratuit)
+
+1. Chaque push sur `main` déclenche `.github/workflows/deploy-pages.yml`,
+   qui build `frontend/` et publie `frontend/dist` sur GitHub Pages.
+2. Réglage unique, une fois : **Settings → Pages → Source : GitHub Actions**
+   sur le dépôt.
+3. L'URL publique (`https://<owner>.github.io/<repo>/`) est un simple lien à
+   partager — fonctionne dans n'importe quel navigateur, aucun blocage IT
+   possible puisqu'il n'y a ni serveur ni exécutable.
+
+Tout le calcul (parsing DXF/IFC, géométrie, ratios, export Excel/DXF) tourne
+sur la machine de chaque utilisateur : pas de limite de RAM serveur partagée,
+pas de redémarrage de conteneur qui perd l'état en cours de route.
+
+## Architecture (frontend, moteur principal)
 
 ```
-backend/    API Python (FastAPI) : extraction, calculs, export
-frontend/   SPA React + TypeScript (Vite) : upload, correction, résultats, export
+frontend/src/
+  engine/
+    geometry.ts              polylignes 2D : projection, intersection de rayon perpendiculaire
+    axisReference.ts         référence spatiale/PK partagée (station <-> PK)
+    dxf/
+      dxfReader.ts            lecteur DXF ASCII écrit à la main (TEXT/MTEXT, POLYLINE
+                               ancienne génération vs LWPOLYLINE, table LAYER)
+      dxfWriter.ts            écrivain DXF R12 (POINT, POLYLINE) pour l'export
+      dxfCommon.ts            classification de textes (cluster par calque/couleur/hauteur/style)
+      axisReferenceDxf.ts     axe depuis calibration PK / repères de profil séquentiels
+      dxfExtractor.ts         extraction existant/projet, calques nommés OU heuristique géométrique
+    ifc/
+      webIfcClient.ts         wrapper web-ifc (ouverture modèle, lecture d'attributs,
+                               géométrie par produit, conversion Y-up -> plan (x, y))
+      ifcGeometry.ts          largeur par maillage : projection sur l'axe, regroupement en
+                               "anneaux" transversaux par proximité de station
+      ifcExtractor.ts         IfcPavement -> IfcPavementType (jamais déduit du nom seul) ->
+                               (côté, élément) suggéré à faible confiance
+      axisReferenceIfc.ts     IfcAlignment si présent, sinon axe PCA de secours (borné, voir
+                               limites connues)
+    export/
+      excelExport.ts          classeur Données/Seuils/Résultats/Comparatif, ratios en
+                               formules Excel natives (exceljs)
+      dxfExport.ts            calques EXISTANT_*/PROJET_*/RATIOS_*/COMPARATIF_*
+    pipeline.ts               orchestration : détecte DXF vs IFC par extension, axe partagé,
+                               extraction existant + projet
+    worker/
+      extraction.worker.ts     exécute pipeline.ts hors du thread principal (fichiers réels
+                               volumineux -> UI jamais bloquée)
+      extractionClient.ts      wrapper Promise côté thread principal
+  calculations/
+    ratios.ts, comparison.ts  ratios de conformité et comparatif — mêmes fonctions que
+                               backend/app/calculations, utilisées ici pour ne jamais dépendre
+                               d'un aller-retour serveur après l'extraction
+  components/, App.tsx        upload des 3 fichiers -> extraction -> Correction manuelle
+                               (dropdowns côté/élément, badge de confiance) -> Résultats ->
+                               Comparatif -> Seuils (éditables) -> Export
 ```
+
+Chaque module JS/TS ci-dessus est un port direct du module Python équivalent
+dans `backend/app/` (mêmes noms de fonctions, mêmes algorithmes) — les deux
+implémentations sont vérifiées produire des résultats identiques sur les
+mêmes fichiers de test (voir Tests plus bas).
+
+### Convention d'axes IFC (Y-up vs Z-up)
+
+`web-ifc` calcule la géométrie monde en **Y-up** (comme Three.js), alors que
+l'IFC natif est en **Z-up**. `webIfcClient.ts` reconvertit chaque sommet à la
+sortie du calcul de géométrie : `(x_webifc, y_webifc, z_webifc) → (x, -z, y)`
+pour retrouver le plan (x, y) natif IFC utilisé partout ailleurs dans le
+pipeline (même convention que `backend/app/extraction/ifc_geometry.py`, qui
+lit directement les coordonnées Z-up d'`ifcopenshell`).
+
+## Démarrage en local (développement)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Tests
+
+Validation manuelle (pas de suite automatisée côté frontend pour l'instant) :
+chaque module du moteur a été vérifié en isolation avec `npx tsx` contre les
+mêmes fixtures DXF/IFC synthétiques que `backend/tests/` (générées via
+`ezdxf`/`ifcopenshell` en Python, consommées ici en TypeScript), puis le
+pipeline complet a été validé dans un vrai navigateur (Playwright) : upload
+DXF et IFC, extraction, correction manuelle par menu déroulant, résultats,
+comparatif, téléchargement Excel (formules vérifiées avec `openpyxl`) et DXF
+(relu avec `ezdxf`, lecteur indépendant strict).
+
+## Limites connues / suite possible
+
+- **Mode calque DXF** : les calques `AXE-*`/`COTE-*` sont lus entité par
+  entité sans fusion de fragments multiples en une polyligne continue —
+  suffisant pour les cotes textuelles (méthode principale en mode calque)
+  mais à renforcer si l'on veut aussi exploiter géométriquement les lignes
+  d'axe déclarées.
+- **IFC sans `IfcAlignment`** : l'axe de secours est reconstruit par PCA +
+  binning sur un nombre borné de sommets (500 produits / 200k sommets max —
+  voir `ifc/axisReferenceIfc.ts` et `ifc/ifcGeometry.ts`), ce qui suit la
+  courbure du tracé mais reste une approximation ; chercher aussi
+  `IfcReferent`/propriétés custom de stationnement reste à faire si
+  rencontré en pratique.
+- **Export DXF "Ratios"/"Comparatif"** : diagramme schématique (PK, valeur)
+  et non une reconstruction géométrique en plan — cohérent avec le fait que
+  le pipeline ne conserve que des largeurs scalaires après extraction.
+- **Fichiers IFC très volumineux** : tout le parsing se fait dans la RAM du
+  navigateur de l'utilisateur ; un fichier de plusieurs centaines de Mo peut
+  être limité par la mémoire disponible sur sa machine plutôt que par un
+  serveur, mais reste théoriquement possible selon sa machine.
+- Le classeur Excel joint par l'utilisateur (`Analyses largeurs
+  chaussées.xlsx`) a servi de référence de vocabulaire et de convention (les
+  4 niveaux de confiance, l'ordre canonique des éléments par gabarit
+  route/autoroute) ; il ne définit pas per se un format d'échange à
+  reproduire au bit près.
+
+## Alternative : backend Python + API REST
+
+Une implémentation équivalente existe en Python (FastAPI, `ezdxf`,
+`ifcopenshell`), utile si une extraction serveur plus robuste sur de très
+gros fichiers IFC est préférable à un traitement 100% navigateur.
 
 ### Backend (`backend/app`)
 
 - `models/domain.py` — vocabulaire partagé (ElementType, Side, StateKind,
   SourceMethod, WidthSample, Band, Threshold, RatioResult, ComparisonRow).
-  Tout le pipeline (DXF, IFC, calculs, export) ne manipule que ces types :
-  DXF et IFC sont interchangeables une fois l'extraction faite.
-- `extraction/`
-  - `geometry.py` — géométrie 2D de polylignes (projection, intersection de
-    rayon perpendiculaire), utilisée par l'axe de référence et le mode
-    heuristique DXF.
-  - `axis_reference.py` — construit la référence spatiale/PK partagée à
-    partir du fichier "Axes + profils" (DXF : polyligne d'axe ancienne
-    génération + calibration par labels PK ou repères de profil séquentiels ;
-    IFC : `IfcAlignment` si présent, sinon axe PCA de secours).
-  - `dxf_common.py`, `dxf_extractor.py` — extraction DXF existant/projet,
-    deux méthodes auto-détectées :
-    - **Calques nommés** (idéal) : layers `AXE-*`/`COTE-*`, cotes textuelles
-      lues directement, confiance maximale.
-    - **Heuristique géométrique** : identification des vraies polylignes
-      d'axe (entités `POLYLINE`, jamais les `LWPOLYLINE` fragmentées),
-      ordonnancement gauche→droite par rapport à l'axe de référence, largeur
-      = intersection rayon perpendiculaire à chaque station. La
-      classification sémantique (BAU/Voie/...) de chaque bande reste une
-      **suggestion à faible confiance** (gabarit "route" ou "autoroute"
-      configurable) — jamais déduite de la seule magnitude numérique,
-      conformément au risque documenté (élargissements ponctuels, zones
-      d'insertion).
-  - `ifc_geometry.py`, `ifc_extractor.py` — extraction IFC :
-    `IfcRoad → IfcRoadPart → IfcPavement`, typage via `IfcPavementType`
-    (jamais déduit du nom seul — toujours proposé à confirmation), largeur
-    calculée depuis le maillage (`ifcopenshell.geom`) en projetant les
-    sommets sur l'axe de référence partagé et en regroupant les sommets par
-    proximité de station ("anneaux" transversaux), largeur = étendue latérale
-    de l'anneau (robuste aux sommets dupliqués d'un solide à épaisseur).
-- `calculations/ratios.py`, `comparison.py` — ratios de conformité (%
-  sous/entre/au-dessus des seuils, profils incomplets naturellement exclus)
-  et comparatif existant/projet avec interpolation PK et statut
-  Amélioré/Inchangé/Dégradé.
-- `export/excel_export.py` — classeur Données / Seuils / Résultats /
-  Comparatif ; seules les valeurs brutes sont écrites, tous les ratios et le
-  comparatif (delta, statut) sont des **formules Excel natives**
-  (`COUNTIFS`, `COUNT`, `IF`, `IFERROR`) référençant l'onglet Seuils, plus
-  mise en forme conditionnelle sur le statut.
-- `export/dxf_export.py` — export DXF en calques structurés
-  `EXISTANT_*`/`PROJET_*`/`RATIOS_*`/`COMPARATIF_*` par côté/élément/état,
-  avec choix Points et/ou Polylignes. Il s'agit d'un diagramme schématique
-  largeur-vs-PK (le pipeline ne conserve que des largeurs scalaires après
-  extraction, pas la géométrie de bord complète).
-- `api/` — `pipeline.py` (orchestration extraction, stateless), `routes.py`
-  (endpoints REST, également stateless — voir section dédiée plus bas).
+- `extraction/` — mêmes algorithmes que la version TypeScript ci-dessus :
+  `geometry.py`, `axis_reference.py`, `dxf_common.py`/`dxf_extractor.py`,
+  `ifc_geometry.py`/`ifc_extractor.py`.
+- `calculations/ratios.py`, `comparison.py` — ratios de conformité et
+  comparatif existant/projet avec interpolation PK.
+- `export/excel_export.py`, `export/dxf_export.py` — mêmes exports que la
+  version TypeScript (openpyxl / ezdxf au lieu d'exceljs / écrivain DXF
+  maison).
+- `api/` — API REST **stateless** : `POST /api/extract` (multipart, les 3
+  fichiers) renvoie bandes + échantillons en une réponse ; correction
+  manuelle, ratios et comparatif se calculent ensuite côté client (ou via
+  les mêmes fonctions Python) ; `POST /api/export/excel` et
+  `/api/export/dxf` prennent les données complètes dans le corps de la
+  requête plutôt que de dépendre d'un état serveur — un redémarrage du
+  conteneur ne perd donc rien en cours de session.
 
-### Frontend (`frontend/src`)
-
-SPA à onglets : upload des 3 fichiers → lancement extraction (choix du
-gabarit route/autoroute) → **Correction manuelle** (tableau des bandes
-détectées, dropdowns côté/élément, badge de confiance coloré selon la même
-légende que le classeur Excel de référence : Entrée manuelle / Menu déroulant
-/ Récupération entrées / Récupération automatique) → **Résultats** (ratios)
-→ **Comparatif** → **Seuils** (éditables) → **Export** (Excel, DXF avec
-options Points/Polylignes et calques à inclure).
-
-## Distribution : exécutable Windows autonome (recommandé)
-
-Pas de serveur, pas de compte à créer, pas d'installateur (donc pas de
-blocage IT) : un `.exe` portable, construit automatiquement par GitHub
-Actions et publié sur la page **Releases** du dépôt.
-
-1. Pousser un tag de version déclenche la construction :
-   ```bash
-   git tag v0.1.0
-   git push origin v0.1.0
-   ```
-2. GitHub Actions (`.github/workflows/build-windows-exe.yml`) compile le
-   frontend, empaquette le backend (FastAPI + `ezdxf` + `ifcopenshell`) avec
-   PyInstaller en un seul fichier `AnalyseGabaritChaussee.exe`, et l'attache
-   automatiquement à une Release GitHub.
-3. Chacun télécharge ce `.exe` depuis la page Releases et le partage comme un
-   simple lien de téléchargement à ses collègues.
-4. Double-clic → une fenêtre console s'ouvre (moteur en cours d'exécution) et
-   le navigateur par défaut s'ouvre automatiquement sur l'outil. Fermer la
-   fenêtre arrête l'outil. Rien n'est installé sur la machine.
-
-**Point d'attention** : un `.exe` non signé numériquement peut déclencher un
-avertissement Windows SmartScreen ("Windows a protégé votre ordinateur") ou
-être mis en quarantaine par un antivirus d'entreprise strict — c'est un faux
-positif classique pour tout exécutable empaqueté par PyInstaller, pas un
-signe de problème réel. La signature de code a un coût et nécessite une
-identité d'éditeur ; elle n'est pas mise en place ici pour rester à coût
-nul. Si ton service informatique bloque malgré tout ce fichier, il faudra
-soit une exception IT, soit passer à l'option d'hébergement web ci-dessous.
-
-## Alternative : lien web hébergé (Render, gratuit)
-
-Le dépôt contient aussi un `Dockerfile` (frontend compilé + backend Python
-dans une seule image) et un `render.yaml` (Render Blueprint) pour un
-déploiement en un clic sur [Render](https://render.com), plan **Free**, si
-un vrai lien web (plutôt qu'un fichier à télécharger) est préférable :
-
-1. Crée un compte Render (gratuit).
-2. Dashboard → **New +** → **Blueprint** → connecte le repo GitHub
-   `Analyse-gabarit-chauss-e-`, branche `claude/road-analysis-dxf-ifc-abbi3t`
-   (ou `main` une fois mergée).
-3. Render détecte `render.yaml` et build/déploie automatiquement.
-4. Tu obtiens une URL publique unique (`https://analyse-gabarit-chaussee.onrender.com`)
-   qui sert à la fois l'application et l'API — aucune configuration
-   supplémentaire (le backend sert le frontend compilé sur la même origine).
-
-Le plan Free de Render met le service en veille après 15 min d'inactivité ;
-le premier chargement après une veille prend ~30-50s le temps qu'il redémarre
-— normal, gratuit, pas de carte bancaire requise.
-
-## Démarrage en local (développement)
-
-### Backend
+### Démarrage backend
 
 ```bash
 cd backend
@@ -149,16 +175,22 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
+### Distribution du backend
 
-```bash
-cd frontend
-npm install
-cp .env.example .env   # ajuster VITE_API_BASE si besoin
-npm run dev
-```
+Deux options déjà configurées dans le dépôt :
 
-### Tests
+- **Exécutable Windows autonome** (`.github/workflows/build-windows-exe.yml`,
+  `backend/desktop_app.py`, `backend/desktop_app.spec`) : un `.exe` portable
+  construit par GitHub Actions et publié sur la page Releases du dépôt —
+  aucune installation, mais peut déclencher un avertissement Windows
+  SmartScreen (fichier non signé) ou être bloqué par un antivirus
+  d'entreprise strict.
+- **Hébergement web gratuit sur Render** (`Dockerfile`, `render.yaml`) :
+  Dashboard Render → New + → Blueprint → connecter le repo. Le plan Free met
+  le service en veille après 15 min d'inactivité (redémarrage ~30-50s au
+  réveil).
+
+### Tests backend
 
 ```bash
 cd backend
@@ -166,44 +198,7 @@ pip install -r requirements.txt
 PYTHONPATH=. pytest tests/ -v
 ```
 
-Les tests couvrent la géométrie de base, l'extraction DXF (calques et
-heuristique) et IFC (avec fichiers synthétiques générés par `ezdxf` et
-`ifcopenshell`), les calculs de ratios/comparatif, l'export Excel/DXF, et
-le pipeline API complet (upload → extraction → correction → résultats →
-export) via `TestClient`. Le flux a aussi été validé manuellement dans un
-navigateur réel (Playwright) : upload, extraction, correction par menu
-déroulant, résultats, comparatif, téléchargement Excel et DXF.
-
-## Architecture stateless (backend sans état)
-
-Le backend ne conserve **aucun état entre les requêtes**. `/api/extract` fait
-tout le travail lourd (parsing DXF/IFC) et renvoie bandes + échantillons en
-une seule réponse ; à partir de là, la correction manuelle, les ratios et le
-comparatif sont calculés **côté navigateur** (`frontend/src/calculations/`,
-port direct de `backend/app/calculations/`) et les exports Excel/DXF
-reçoivent les données complètes dans la requête plutôt que de les relire
-d'un état serveur. Un redémarrage du conteneur (mise en veille du plan
-gratuit Render après 15 min d'inactivité, redéploiement, OOM) ne perd donc
-plus rien en cours de session — ce n'était pas le cas dans une version
-précédente qui gardait un `ProjectStore` en mémoire indexé par projet, et qui
-provoquait des erreurs "Projet introuvable" après tout redémarrage.
-
-## Limites connues / suite possible
-
-- **Mode calque DXF** : les limites de calques (`AXE-*`/`COTE-*`) sont lues
-  entité par entité sans fusion de fragments `LWPOLYLINE multiples en une
-  polyligne continue — suffisant pour les cotes textuelles (méthode
-  principale en mode calque) mais à renforcer si l'on veut aussi exploiter
-  géométriquement les lignes d'axe déclarées.
-- **IFC sans `IfcAlignment`** : l'axe de secours est reconstruit par PCA +
-  binning, ce qui suit la courbure du tracé mais reste une approximation ;
-  chercher aussi `IfcReferent`/propriétés custom de stationnement reste à
-  faire si rencontré en pratique.
-- **Export DXF "Ratios"/"Comparatif"** : diagramme schématique (PK, valeur)
-  et non une reconstruction géométrique en plan — cohérent avec le fait que
-  le pipeline ne conserve que des largeurs scalaires après extraction.
-- Le classeur Excel joint par l'utilisateur (`Analyses largeurs
-  chaussées.xlsx`) a servi de référence de vocabulaire et de convention (les
-  4 niveaux de confiance, l'ordre canonique des éléments par gabarit
-  route/autoroute) ; il ne définit pas per se un format d'échange à
-  reproduire au bit près.
+Couvre la géométrie de base, l'extraction DXF (calques et heuristique) et
+IFC (fichiers synthétiques `ezdxf`/`ifcopenshell`), les calculs de
+ratios/comparatif, l'export Excel/DXF, et le pipeline API complet via
+`TestClient`.

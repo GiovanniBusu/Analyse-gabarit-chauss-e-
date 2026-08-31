@@ -1,7 +1,5 @@
 import { useMemo, useState } from "react";
 import "./App.css";
-import * as api from "./api/client";
-import type { DxfExportOptions } from "./api/client";
 import UploadPanel from "./components/UploadPanel";
 import MappingTable from "./components/MappingTable";
 import ResultsPanel from "./components/ResultsPanel";
@@ -10,6 +8,9 @@ import ThresholdsPanel from "./components/ThresholdsPanel";
 import ExportPanel from "./components/ExportPanel";
 import { computeRatios } from "./calculations/ratios";
 import { compareStates } from "./calculations/comparison";
+import { extractInWorker, fileToInput } from "./engine/worker/extractionClient";
+import { buildWorkbook } from "./engine/export/excelExport";
+import { buildDxf, type DxfExportOptions } from "./engine/export/dxfExport";
 import type { Band, ElementType, Side, Threshold, UploadRole, WidthSample } from "./types/domain";
 import { DEFAULT_DELTA_SEUIL_M, DEFAULT_THRESHOLDS } from "./types/domain";
 
@@ -43,26 +44,27 @@ function App() {
     setExtracting(true);
     setError(null);
     try {
-      const res = await api.extract(
-        { axes_profils: files.axes_profils, existant: files.existant, projet: files.projet },
-        gabarit,
-        dxfStepM,
-      );
+      const [axesInput, existantInput, projetInput] = await Promise.all([
+        fileToInput(files.axes_profils),
+        fileToInput(files.existant),
+        fileToInput(files.projet),
+      ]);
+      const res = await extractInWorker(axesInput, existantInput, projetInput, gabarit, dxfStepM);
       setBands(res.bands);
       setSamples(res.samples);
-      setAxisConfidence(res.axis_confidence);
+      setAxisConfidence(res.axisConfidence);
       setTab("mapping");
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setExtracting(false);
     }
   };
 
-  // Overriding a band's classification never touches the server: it's a pure
-  // relabel of already-extracted samples, so it survives a backend restart
-  // (Render's free tier stops the container after 15 min idle) and doesn't
-  // need the original DXF/IFC files re-parsed.
+  // Overriding a band's classification is a pure relabel of already-extracted
+  // samples, done entirely in the browser — everything downstream (ratios,
+  // comparatif, export) runs client-side too, so this never needs the
+  // original DXF/IFC files re-parsed, and there is no server to lose state.
   const handleOverride = (bandId: string, side: Side, elementType: ElementType) => {
     setBands((prev) =>
       prev.map((b) =>
@@ -88,19 +90,20 @@ function App() {
 
   const handleExportExcel = async () => {
     try {
-      const blob = await api.exportExcel(samples, thresholds, deltaSeuilM, comparisonRows);
-      downloadBlob(blob, "analyse_gabarit.xlsx");
+      const wb = await buildWorkbook(samples, thresholds, deltaSeuilM, comparisonRows);
+      const buffer = await wb.xlsx.writeBuffer();
+      downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "analyse_gabarit.xlsx");
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const handleExportDxf = async (options: DxfExportOptions) => {
+  const handleExportDxf = (options: DxfExportOptions) => {
     try {
-      const blob = await api.exportDxf(samples, thresholds, deltaSeuilM, comparisonRows, options);
-      downloadBlob(blob, "analyse_gabarit.dxf");
+      const content = buildDxf(samples, thresholds, comparisonRows, options);
+      downloadBlob(new Blob([content], { type: "application/dxf" }), "analyse_gabarit.dxf");
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 

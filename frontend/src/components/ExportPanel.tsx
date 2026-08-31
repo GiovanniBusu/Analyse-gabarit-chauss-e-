@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DxfExportOptions } from "../api/client";
+import type { DxfExportOptions } from "../engine/export/dxfExport";
 
 interface Props {
   onExportExcel: () => void;
@@ -8,12 +8,12 @@ interface Props {
 
 export default function ExportPanel({ onExportExcel, onExportDxf }: Props) {
   const [options, setOptions] = useState<DxfExportOptions>({
-    include_points: true,
-    include_polylines: true,
-    include_existant: true,
-    include_projet: true,
-    include_ratios: false,
-    include_comparatif: false,
+    includePoints: true,
+    includePolylines: true,
+    includeExistant: true,
+    includeProjet: true,
+    includeRatios: false,
+    includeComparatif: false,
   });
 
   const toggle = (key: keyof DxfExportOptions) => setOptions((o) => ({ ...o, [key]: !o[key] }));
@@ -28,39 +28,27 @@ export default function ExportPanel({ onExportExcel, onExportDxf }: Props) {
         <h3>Export DXF</h3>
         <div className="checkbox-grid">
           <label>
-            <input type="checkbox" checked={options.include_points} onChange={() => toggle("include_points")} />
+            <input type="checkbox" checked={options.includePoints} onChange={() => toggle("includePoints")} />
             Points
           </label>
           <label>
-            <input
-              type="checkbox"
-              checked={options.include_polylines}
-              onChange={() => toggle("include_polylines")}
-            />
+            <input type="checkbox" checked={options.includePolylines} onChange={() => toggle("includePolylines")} />
             Polylignes
           </label>
           <label>
-            <input
-              type="checkbox"
-              checked={options.include_existant}
-              onChange={() => toggle("include_existant")}
-            />
+            <input type="checkbox" checked={options.includeExistant} onChange={() => toggle("includeExistant")} />
             Calque Existant
           </label>
           <label>
-            <input type="checkbox" checked={options.include_projet} onChange={() => toggle("include_projet")} />
+            <input type="checkbox" checked={options.includeProjet} onChange={() => toggle("includeProjet")} />
             Calque Projet
           </label>
           <label>
-            <input type="checkbox" checked={options.include_ratios} onChange={() => toggle("include_ratios")} />
+            <input type="checkbox" checked={options.includeRatios} onChange={() => toggle("includeRatios")} />
             Calque Ratios (conformité)
           </label>
           <label>
-            <input
-              type="checkbox"
-              checked={options.include_comparatif}
-              onChange={() => toggle("include_comparatif")}
-            />
+            <input type="checkbox" checked={options.includeComparatif} onChange={() => toggle("includeComparatif")} />
             Calque Comparatif
           </label>
         </div>

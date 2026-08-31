@@ -10,8 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "web-ifc": "^0.0.77"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
