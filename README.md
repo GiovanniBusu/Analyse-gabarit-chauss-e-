@@ -76,8 +76,8 @@ frontend/   SPA React + TypeScript (Vite) : upload, correction, résultats, expo
   avec choix Points et/ou Polylignes. Il s'agit d'un diagramme schématique
   largeur-vs-PK (le pipeline ne conserve que des largeurs scalaires après
   extraction, pas la géométrie de bord complète).
-- `api/` — `store.py` (état projet en mémoire), `pipeline.py` (orchestration
-  extraction), `routes.py` (endpoints REST).
+- `api/` — `pipeline.py` (orchestration extraction, stateless), `routes.py`
+  (endpoints REST, également stateless — voir section dédiée plus bas).
 
 ### Frontend (`frontend/src`)
 
@@ -174,10 +174,22 @@ export) via `TestClient`. Le flux a aussi été validé manuellement dans un
 navigateur réel (Playwright) : upload, extraction, correction par menu
 déroulant, résultats, comparatif, téléchargement Excel et DXF.
 
+## Architecture stateless (backend sans état)
+
+Le backend ne conserve **aucun état entre les requêtes**. `/api/extract` fait
+tout le travail lourd (parsing DXF/IFC) et renvoie bandes + échantillons en
+une seule réponse ; à partir de là, la correction manuelle, les ratios et le
+comparatif sont calculés **côté navigateur** (`frontend/src/calculations/`,
+port direct de `backend/app/calculations/`) et les exports Excel/DXF
+reçoivent les données complètes dans la requête plutôt que de les relire
+d'un état serveur. Un redémarrage du conteneur (mise en veille du plan
+gratuit Render après 15 min d'inactivité, redéploiement, OOM) ne perd donc
+plus rien en cours de session — ce n'était pas le cas dans une version
+précédente qui gardait un `ProjectStore` en mémoire indexé par projet, et qui
+provoquait des erreurs "Projet introuvable" après tout redémarrage.
+
 ## Limites connues / suite possible
 
-- **Aucune base de données** : l'état projet vit en mémoire côté serveur
-  (MVP). À remplacer par un stockage persistant pour un usage multi-session.
 - **Mode calque DXF** : les limites de calques (`AXE-*`/`COTE-*`) sont lues
   entité par entité sans fusion de fragments `LWPOLYLINE multiples en une
   polyligne continue — suffisant pour les cotes textuelles (méthode

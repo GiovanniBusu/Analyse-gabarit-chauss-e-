@@ -60,6 +60,28 @@ export interface Threshold {
   standard_m: number;
 }
 
+export interface WidthSample {
+  pk: number;
+  side: Side;
+  element_type: ElementType;
+  state: StateKind;
+  width_m?: number | null;
+  source: SourceMethod;
+  band_id?: string | null;
+  note?: string | null;
+}
+
+export const DEFAULT_THRESHOLDS: Threshold[] = [
+  { element_type: "bau", reduit_m: 2.5, standard_m: 3.25 },
+  { element_type: "voie", reduit_m: 7.5, standard_m: 8.0 },
+  { element_type: "accotement", reduit_m: 1.0, standard_m: 2.5 },
+  { element_type: "trottoir", reduit_m: 1.5, standard_m: 2.0 },
+  { element_type: "cycle", reduit_m: 1.5, standard_m: 2.0 },
+  { element_type: "tpc", reduit_m: 1.0, standard_m: 3.0 },
+];
+
+export const DEFAULT_DELTA_SEUIL_M = 0.05;
+
 export interface RatioResult {
   side: Side;
   element_type: ElementType;

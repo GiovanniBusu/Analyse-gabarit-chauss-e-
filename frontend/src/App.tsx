@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 import * as api from "./api/client";
 import type { DxfExportOptions } from "./api/client";
@@ -8,66 +8,49 @@ import ResultsPanel from "./components/ResultsPanel";
 import ComparisonPanel from "./components/ComparisonPanel";
 import ThresholdsPanel from "./components/ThresholdsPanel";
 import ExportPanel from "./components/ExportPanel";
-import type { Band, ComparisonRow, ElementType, RatioResult, Side, Threshold, UploadRole } from "./types/domain";
+import { computeRatios } from "./calculations/ratios";
+import { compareStates } from "./calculations/comparison";
+import type { Band, ElementType, Side, Threshold, UploadRole, WidthSample } from "./types/domain";
+import { DEFAULT_DELTA_SEUIL_M, DEFAULT_THRESHOLDS } from "./types/domain";
 
 type Tab = "mapping" | "results" | "comparison" | "thresholds" | "export";
 
 function App() {
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [uploaded, setUploaded] = useState<Partial<Record<UploadRole, string>>>({});
+  const [files, setFiles] = useState<Partial<Record<UploadRole, File>>>({});
   const [gabarit, setGabarit] = useState("route");
   const [dxfStepM, setDxfStepM] = useState(5.0);
   const [bands, setBands] = useState<Band[]>([]);
+  const [samples, setSamples] = useState<WidthSample[]>([]);
   const [axisConfidence, setAxisConfidence] = useState<string | null>(null);
-  const [ratios, setRatios] = useState<RatioResult[]>([]);
-  const [comparisonRows, setComparisonRows] = useState<ComparisonRow[]>([]);
-  const [thresholds, setThresholds] = useState<Threshold[]>([]);
-  const [deltaSeuilM, setDeltaSeuilM] = useState(0.05);
+  const [thresholds, setThresholds] = useState<Threshold[]>(DEFAULT_THRESHOLDS);
+  const [deltaSeuilM, setDeltaSeuilM] = useState(DEFAULT_DELTA_SEUIL_M);
   const [tab, setTab] = useState<Tab>("mapping");
   const [error, setError] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
 
-  useEffect(() => {
-    api
-      .createProject()
-      .then((id) => {
-        setProjectId(id);
-        return api.getThresholds(id);
-      })
-      .then((t) => {
-        setThresholds(t.thresholds);
-        setDeltaSeuilM(t.delta_seuil_m);
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
+  const allThreeUploaded = ["axes_profils", "existant", "projet"].every((r) => files[r as UploadRole]);
 
-  const allThreeUploaded = ["axes_profils", "existant", "projet"].every((r) => uploaded[r as UploadRole]);
+  const ratios = useMemo(() => computeRatios(samples, thresholds), [samples, thresholds]);
+  const comparisonRows = useMemo(() => compareStates(samples, deltaSeuilM), [samples, deltaSeuilM]);
 
-  const handleUpload = async (role: UploadRole, file: File) => {
-    if (!projectId) return;
-    try {
-      await api.uploadFile(projectId, role, file);
-      setUploaded((prev) => ({ ...prev, [role]: file.name }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+  const handleFileSelected = (role: UploadRole, file: File) => {
+    setFiles((prev) => ({ ...prev, [role]: file }));
+    setError(null);
   };
 
   const handleExtract = async () => {
-    if (!projectId) return;
+    if (!files.axes_profils || !files.existant || !files.projet) return;
     setExtracting(true);
     setError(null);
     try {
-      const res = await api.extract(projectId, gabarit, dxfStepM);
+      const res = await api.extract(
+        { axes_profils: files.axes_profils, existant: files.existant, projet: files.projet },
+        gabarit,
+        dxfStepM,
+      );
       setBands(res.bands);
+      setSamples(res.samples);
       setAxisConfidence(res.axis_confidence);
-      const [resultsRes, comparisonRes] = await Promise.all([
-        api.getResults(projectId),
-        api.getComparison(projectId),
-      ]);
-      setRatios(resultsRes.ratios);
-      setComparisonRows(comparisonRes.rows);
       setTab("mapping");
     } catch (e) {
       setError(String(e));
@@ -76,54 +59,46 @@ function App() {
     }
   };
 
-  const handleOverride = async (bandId: string, side: Side, elementType: ElementType) => {
-    if (!projectId) return;
-    try {
-      const updatedBands = await api.overrideBand(projectId, bandId, side, elementType);
-      setBands(updatedBands);
-      const [resultsRes, comparisonRes] = await Promise.all([
-        api.getResults(projectId),
-        api.getComparison(projectId),
-      ]);
-      setRatios(resultsRes.ratios);
-      setComparisonRows(comparisonRes.rows);
-    } catch (e) {
-      setError(String(e));
-    }
+  // Overriding a band's classification never touches the server: it's a pure
+  // relabel of already-extracted samples, so it survives a backend restart
+  // (Render's free tier stops the container after 15 min idle) and doesn't
+  // need the original DXF/IFC files re-parsed.
+  const handleOverride = (bandId: string, side: Side, elementType: ElementType) => {
+    setBands((prev) =>
+      prev.map((b) =>
+        b.band_id === bandId ? { ...b, side, element_type: elementType, source: "menu_deroulant", confidence: 1.0 } : b,
+      ),
+    );
+    setSamples((prev) => prev.map((s) => (s.band_id === bandId ? { ...s, side, element_type: elementType } : s)));
   };
 
-  const handleThresholdsChange = async (next: Threshold[], nextDelta: number) => {
+  const handleThresholdsChange = (next: Threshold[], nextDelta: number) => {
     setThresholds(next);
     setDeltaSeuilM(nextDelta);
-    if (!projectId) return;
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = async () => {
     try {
-      await api.updateThresholds(projectId, next, nextDelta);
-      const [resultsRes, comparisonRes] = await Promise.all([
-        api.getResults(projectId),
-        api.getComparison(projectId),
-      ]);
-      setRatios(resultsRes.ratios);
-      setComparisonRows(comparisonRes.rows);
+      const blob = await api.exportExcel(samples, thresholds, deltaSeuilM, comparisonRows);
+      downloadBlob(blob, "analyse_gabarit.xlsx");
     } catch (e) {
       setError(String(e));
     }
-  };
-
-  const handleExportExcel = () => {
-    if (!projectId) return;
-    window.open(api.exportExcelUrl(projectId), "_blank");
   };
 
   const handleExportDxf = async (options: DxfExportOptions) => {
-    if (!projectId) return;
     try {
-      const blob = await api.exportDxf(projectId, options);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "analyse_gabarit.dxf";
-      a.click();
-      URL.revokeObjectURL(url);
+      const blob = await api.exportDxf(samples, thresholds, deltaSeuilM, comparisonRows, options);
+      downloadBlob(blob, "analyse_gabarit.dxf");
     } catch (e) {
       setError(String(e));
     }
@@ -138,7 +113,10 @@ function App() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <UploadPanel onUpload={handleUpload} uploaded={uploaded} />
+      <UploadPanel
+        onUpload={async (role, file) => handleFileSelected(role, file)}
+        uploaded={Object.fromEntries(Object.entries(files).map(([k, f]) => [k, f?.name])) as Partial<Record<UploadRole, string>>}
+      />
 
       <section className="panel">
         <h2>Extraction</h2>
