@@ -11,6 +11,9 @@ on:
         required: true
         default: "v0.1.0"
 
+permissions:
+  contents: write # softprops/action-gh-release needs this to create the tag + release
+
 jobs:
   build:
     runs-on: windows-latest
