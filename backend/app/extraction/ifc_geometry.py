@@ -30,17 +30,38 @@ def shape_vertices(product) -> np.ndarray | None:
     return arr
 
 
-def all_vertices(ifc, ifc_class: str = "IfcPavement") -> np.ndarray:
+def all_vertices(
+    ifc,
+    ifc_class: str = "IfcPavement",
+    max_products: int = 500,
+    max_vertices: int = 200_000,
+) -> np.ndarray:
+    """Collects vertices for the PCA fallback axis. Bounded on purpose: this
+    only needs enough points to fit a stable direction and a binned
+    centerline, not the whole model. Without a cap, a reference file that
+    happens to carry no IfcPavement falls through to triangulating *every*
+    IfcProduct in the file — on a real full BIM export (as opposed to the
+    small synthetic fixtures this was tested against) that is enough
+    triangulated geometry to exceed a 512 MB container and get OOM-killed."""
     chunks = []
+    total = 0
     for product in ifc.by_type(ifc_class):
         v = shape_vertices(product)
         if v is not None:
             chunks.append(v)
+            total += len(v)
+        if total >= max_vertices:
+            break
     if not chunks:
+        count = 0
         for product in ifc.by_type("IfcProduct"):
             v = shape_vertices(product)
             if v is not None:
                 chunks.append(v)
+                total += len(v)
+                count += 1
+            if count >= max_products or total >= max_vertices:
+                break
     if not chunks:
         raise ValueError("No geometry found in IFC file to build a fallback axis")
     return np.concatenate(chunks, axis=0)
