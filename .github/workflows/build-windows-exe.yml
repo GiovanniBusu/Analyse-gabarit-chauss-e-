@@ -4,7 +4,12 @@ on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to create/publish (e.g. v0.1.0). Only used for manual runs — a tag push uses its own tag name."
+        required: true
+        default: "v0.1.0"
 
 jobs:
   build:
@@ -44,9 +49,13 @@ jobs:
           path: backend/dist/AnalyseGabaritChaussee.exe
           if-no-files-found: error
 
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create/publish GitHub Release
+        # On a tag push, softprops uses that tag automatically. On a manual
+        # run there is no tag yet — passing tag_name here makes the action
+        # create it (pointing at this run's commit) and publish the release
+        # in the same step, no separate `git push --tags` needed.
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
           files: backend/dist/AnalyseGabaritChaussee.exe
           generate_release_notes: true
