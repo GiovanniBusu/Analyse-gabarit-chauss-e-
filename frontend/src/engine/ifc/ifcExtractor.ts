@@ -29,7 +29,7 @@ interface PavementGroup {
 }
 
 function pavementTypeName(api: IfcAPI, modelID: number, line: Record<string, unknown>, expressID: number): string {
-  const relTypeIds = api.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYTYPE);
+  const relTypeIds = api.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYTYPE, true);
   for (let i = 0; i < relTypeIds.size(); i++) {
     const rel = api.GetLine(modelID, relTypeIds.get(i)) as Record<string, unknown>;
     const related = attrRefList(rel, "RelatedObjects");
@@ -65,7 +65,7 @@ function matchesState(name: string | null, state: StateKind): boolean {
 
 function buildParentMap(api: IfcAPI, modelID: number): Map<number, number> {
   const parentMap = new Map<number, number>();
-  const relAggIds = api.GetLineIDsWithType(modelID, WebIFC.IFCRELAGGREGATES);
+  const relAggIds = api.GetLineIDsWithType(modelID, WebIFC.IFCRELAGGREGATES, true);
   for (let i = 0; i < relAggIds.size(); i++) {
     const rel = api.GetLine(modelID, relAggIds.get(i)) as Record<string, unknown>;
     const parent = attrRef(rel, "RelatingObject");
@@ -76,7 +76,7 @@ function buildParentMap(api: IfcAPI, modelID: number): Map<number, number> {
 }
 
 function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind): PavementGroup[] {
-  const pavementIds = api.GetLineIDsWithType(modelID, WebIFC.IFCPAVEMENT);
+  const pavementIds = api.GetLineIDsWithType(modelID, WebIFC.IFCPAVEMENT, true);
   const ids: number[] = [];
   for (let i = 0; i < pavementIds.size(); i++) ids.push(pavementIds.get(i));
 
