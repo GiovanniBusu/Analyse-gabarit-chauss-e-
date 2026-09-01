@@ -8,7 +8,7 @@ import { attrRef, attrRefList } from "./webIfcClient";
 import { allVertices, pcaAxisPolyline } from "./ifcGeometry";
 
 function allExpressIdsOfType(api: IfcAPI, modelID: number, type: number): number[] {
-  const ids = api.GetLineIDsWithType(modelID, type);
+  const ids = api.GetLineIDsWithType(modelID, type, true);
   const out: number[] = [];
   for (let i = 0; i < ids.size(); i++) out.push(ids.get(i));
   return out;
