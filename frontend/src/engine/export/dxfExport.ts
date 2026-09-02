@@ -144,17 +144,61 @@ export function buildDxf(
   }
 
   if (options.includeRatios) {
+    // Drawn as colored lines at the band's true plan position (the near/far
+    // midpoint), not a (pk, largeur) scatter — matches how the reference
+    // drawings the user is matching against show compliance directly on the
+    // plan, not as a separate abstract chart.
     const thresholdByType = new Map(thresholds.map((t) => [t.element_type, t]));
+    const classify = (width: number, threshold: Threshold): number =>
+      width < threshold.reduit_m ? ACI_RATIO_SOUS_REDUIT : width < threshold.standard_m ? ACI_RATIO_ENTRE : ACI_RATIO_STANDARD;
+
+    const byGroup = new Map<string, WidthSample[]>();
     for (const s of samples) {
       if (s.width_m == null) continue;
-      const threshold = thresholdByType.get(s.element_type);
-      if (!threshold) continue;
-      let color: number;
-      if (s.width_m < threshold.reduit_m) color = ACI_RATIO_SOUS_REDUIT;
-      else if (s.width_m < threshold.standard_m) color = ACI_RATIO_ENTRE;
-      else color = ACI_RATIO_STANDARD;
-      const layer = writer.ensureLayer(`RATIOS_${STATE_TAG[s.state]}_${SIDE_TAG[s.side]}_${TYPE_TAG[s.element_type]}`);
-      if (options.includePoints) writer.addPoint(layer, s.pk, s.width_m, color);
+      if (s.element_type === "non_utilise") continue;
+      if (!thresholdByType.has(s.element_type)) continue;
+      const key = `${s.side}|${s.element_type}|${s.state}`;
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key)!.push(s);
+    }
+    for (const [key, groupSamples] of byGroup.entries()) {
+      const [side, elementType, state] = key.split("|") as [Side, ElementType, StateKind];
+      const threshold = thresholdByType.get(elementType)!;
+      const layer = writer.ensureLayer(`RATIOS_${STATE_TAG[state]}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`);
+
+      const planSamples = groupSamples.filter(
+        (s): s is WidthSample & { near_x: number; near_y: number; far_x: number; far_y: number; width_m: number } =>
+          s.near_x != null && s.near_y != null && s.far_x != null && s.far_y != null && s.width_m != null,
+      );
+      if (planSamples.length >= 2) {
+        const ordered = [...planSamples].sort((a, b) => a.pk - b.pk);
+        const centerline = ordered.map((s) => ({
+          point: [(s.near_x + s.far_x) / 2, (s.near_y + s.far_y) / 2] as [number, number],
+          color: classify(s.width_m, threshold),
+        }));
+        if (options.includePoints) {
+          for (const c of centerline) writer.addPoint(layer, c.point[0], c.point[1], c.color);
+        }
+        if (options.includePolylines) {
+          const gaps = centerline.slice(1).map((c, i) => Math.hypot(c.point[0] - centerline[i].point[0], c.point[1] - centerline[i].point[1]));
+          const sortedGaps = [...gaps].sort((a, b) => a - b);
+          const median = sortedGaps[Math.floor(sortedGaps.length / 2)] ?? 0;
+          const gapThreshold = Math.max(median * 8, 1e-6);
+          // Each segment is its own polyline so it can carry its own
+          // classification color — a DXF polyline is single-color, and the
+          // classification can change from one sample to the next.
+          for (let i = 0; i < centerline.length - 1; i++) {
+            if (gaps[i] > gapThreshold) continue;
+            writer.addPolyline(layer, [centerline[i].point, centerline[i + 1].point], centerline[i].color);
+          }
+        }
+      } else if (options.includePoints) {
+        // Schematic fallback (pk, largeur) — no boundary geometry available
+        // for this band (DXF calque/cote mode).
+        for (const s of groupSamples) {
+          if (s.width_m != null) writer.addPoint(layer, s.pk, s.width_m, classify(s.width_m, threshold));
+        }
+      }
     }
   }
 
