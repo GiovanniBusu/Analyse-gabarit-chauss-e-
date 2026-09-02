@@ -128,9 +128,18 @@ comparatif, téléchargement Excel (formules vérifiées avec `openpyxl`) et DXF
   courbure du tracé mais reste une approximation ; chercher aussi
   `IfcReferent`/propriétés custom de stationnement reste à faire si
   rencontré en pratique.
-- **Export DXF "Ratios"/"Comparatif"** : diagramme schématique (PK, valeur)
-  et non une reconstruction géométrique en plan — cohérent avec le fait que
-  le pipeline ne conserve que des largeurs scalaires après extraction.
+- **Export DXF "Existant"/"Projet"** : reconstruction en plan (vraies
+  coordonnées x, y) à partir des points de bord proche/lointain que
+  l'extracteur calcule déjà en projetant sur l'axe — disponible pour le mode
+  heuristique DXF (lignes POLYLINE) et pour l'IFC, tous deux dotés d'une
+  géométrie de bord réelle. Le mode calque DXF (cotes textuelles seules, pas
+  de ligne de bord) ne peut pas produire cette reconstruction et retombe sur
+  l'ancien diagramme schématique (PK, valeur) pour les bandes concernées. Le
+  calque `AXE` est toujours ajouté en référence. **Export DXF
+  "Ratios"/"Comparatif"** : reste un diagramme schématique (PK, valeur) dans
+  tous les cas — ce sont des grandeurs dérivées (un ratio, un delta), pas une
+  géométrie de bord en soi. Le backend Python (alternative) n'a pour l'instant
+  que l'export schématique historique, pas cette reconstruction en plan.
 - **Fichiers IFC très volumineux** : tout le parsing se fait dans la RAM du
   navigateur de l'utilisateur ; un fichier de plusieurs centaines de Mo peut
   être limité par la mémoire disponible sur sa machine plutôt que par un

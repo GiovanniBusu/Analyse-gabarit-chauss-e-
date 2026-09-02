@@ -11,6 +11,7 @@ import { compareStates } from "./calculations/comparison";
 import { extractInWorker, fileToInput } from "./engine/worker/extractionClient";
 import { buildWorkbook } from "./engine/export/excelExport";
 import { buildDxf, type DxfExportOptions } from "./engine/export/dxfExport";
+import type { Point } from "./engine/geometry";
 import type { Band, ElementType, Side, Threshold, UploadRole, WidthSample } from "./types/domain";
 import { DEFAULT_DELTA_SEUIL_M, DEFAULT_THRESHOLDS } from "./types/domain";
 
@@ -23,6 +24,7 @@ function App() {
   const [bands, setBands] = useState<Band[]>([]);
   const [samples, setSamples] = useState<WidthSample[]>([]);
   const [axisConfidence, setAxisConfidence] = useState<string | null>(null);
+  const [axisPoints, setAxisPoints] = useState<Point[]>([]);
   const [thresholds, setThresholds] = useState<Threshold[]>(DEFAULT_THRESHOLDS);
   const [deltaSeuilM, setDeltaSeuilM] = useState(DEFAULT_DELTA_SEUIL_M);
   const [tab, setTab] = useState<Tab>("mapping");
@@ -53,6 +55,7 @@ function App() {
       setBands(res.bands);
       setSamples(res.samples);
       setAxisConfidence(res.axisConfidence);
+      setAxisPoints(res.axisPoints);
       setTab("mapping");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -100,7 +103,7 @@ function App() {
 
   const handleExportDxf = (options: DxfExportOptions) => {
     try {
-      const content = buildDxf(samples, thresholds, comparisonRows, options);
+      const content = buildDxf(samples, thresholds, comparisonRows, options, axisPoints);
       downloadBlob(new Blob([content], { type: "application/dxf" }), "analyse_gabarit.dxf");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

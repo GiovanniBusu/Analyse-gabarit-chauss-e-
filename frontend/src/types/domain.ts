@@ -69,6 +69,15 @@ export interface WidthSample {
   source: SourceMethod;
   band_id?: string | null;
   note?: string | null;
+  // Plan-view (true x, y) boundary points bounding this band at this PK, for
+  // DXF plan reconstruction. Populated only when the extraction method has
+  // real boundary geometry to draw from (DXF heuristic mode, IFC) — left null
+  // for DXF calque/cote mode, which only ever has a (pk, value) text label,
+  // no boundary line to reconstruct a plan curve from.
+  near_x?: number | null;
+  near_y?: number | null;
+  far_x?: number | null;
+  far_y?: number | null;
 }
 
 export const DEFAULT_THRESHOLDS: Threshold[] = [

@@ -1,9 +1,17 @@
-/** Port of backend/app/export/dxf_export.py: a schematic width-vs-PK chart
- * (X = PK, Y = width), layered by Existant/Projet/Ratios/Comparatif. See the
- * Python module's docstring for why this isn't a plan-view reconstruction:
- * the pipeline only keeps scalar widths after extraction, not boundary curves. */
+/** Port of backend/app/export/dxf_export.py, extended with a true plan-view
+ * reconstruction: Existant/Projet bands are drawn as real (x, y) boundary
+ * curves (the near/far edges the extractor already computed while
+ * projecting onto the axis) alongside the shared reference axis, so opening
+ * the DXF shows the actual road geometry rather than an abstract chart.
+ * This only works for extraction methods that have boundary geometry to
+ * draw from (DXF heuristic mode, IFC) — samples from DXF calque/cote mode
+ * carry no near/far points (only a (pk, value) text label), so those bands
+ * fall back to the previous schematic (pk, largeur) chart. Ratios/Comparatif
+ * stay schematic in all cases: they're derived scalars (a ratio, a delta),
+ * not something with a plan-view boundary in the first place. */
 
 import { DxfWriter } from "../dxf/dxfWriter";
+import type { Point } from "../geometry";
 import type { ComparisonRow, ComparisonStatus, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
 
 const SIDE_TAG: Record<Side, string> = { gauche: "G", droite: "D" };
@@ -54,11 +62,17 @@ export function buildDxf(
   thresholds: Threshold[],
   comparisonRows: ComparisonRow[] | null,
   options: DxfExportOptions,
+  axisPoints?: Point[],
 ): string {
   const writer = new DxfWriter();
 
+  if (axisPoints && axisPoints.length >= 2) {
+    const layer = writer.ensureLayer("AXE", 7);
+    writer.addPolyline(layer, axisPoints, 7);
+  }
+
   if (options.includeExistant || options.includeProjet) {
-    const byGroup = new Map<string, [number, number][]>();
+    const byGroup = new Map<string, WidthSample[]>();
     const meta = new Map<string, [Side, ElementType, StateKind]>();
     for (const s of samples) {
       if (s.width_m == null) continue;
@@ -69,13 +83,34 @@ export function buildDxf(
         byGroup.set(key, []);
         meta.set(key, [s.side, s.element_type, s.state]);
       }
-      byGroup.get(key)!.push([s.pk, s.width_m]);
+      byGroup.get(key)!.push(s);
     }
-    for (const [key, points] of byGroup.entries()) {
+    for (const [key, groupSamples] of byGroup.entries()) {
       const [side, elementType, state] = meta.get(key)!;
       const color = SERIES_COLOR[state][side];
       const layer = writer.ensureLayer(`${STATE_TAG[state]}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`, color);
-      drawSeries(writer, layer, points, color, options);
+
+      const planSamples = groupSamples.filter(
+        (s): s is WidthSample & { near_x: number; near_y: number; far_x: number; far_y: number } =>
+          s.near_x != null && s.near_y != null && s.far_x != null && s.far_y != null,
+      );
+      if (planSamples.length >= 2) {
+        const ordered = [...planSamples].sort((a, b) => a.pk - b.pk);
+        const nearLine: [number, number][] = ordered.map((s) => [s.near_x, s.near_y]);
+        const farLine: [number, number][] = ordered.map((s) => [s.far_x, s.far_y]);
+        if (options.includePoints) {
+          for (const [x, y] of [...nearLine, ...farLine]) writer.addPoint(layer, x, y, color);
+        }
+        if (options.includePolylines) {
+          writer.addPolyline(layer, nearLine, color);
+          writer.addPolyline(layer, farLine, color);
+        }
+      } else {
+        // Schematic fallback (pk, largeur) — no boundary geometry available
+        // for this band (DXF calque/cote mode).
+        const points: [number, number][] = groupSamples.filter((s) => s.width_m != null).map((s) => [s.pk, s.width_m as number]);
+        drawSeries(writer, layer, points, color, options);
+      }
     }
   }
 
