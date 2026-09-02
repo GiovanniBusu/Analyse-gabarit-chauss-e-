@@ -4,11 +4,12 @@ import { AxisReference, linearFit } from "../axisReference";
 import { PolylineIndex, type Point } from "../geometry";
 import { parseDxf } from "./dxfReader";
 import { clusterTexts, isPureInt, numericValue } from "./dxfCommon";
+import { maxOf, minOf } from "../arrayUtils";
 
 function pickMainAxis(lines: Point[][]): Point[] {
   if (lines.length === 0) throw new Error("No legacy POLYLINE entities found to serve as axis");
   const lengths = lines.map((l) => new PolylineIndex(l).length);
-  const maxLen = Math.max(...lengths);
+  const maxLen = maxOf(lengths);
   const candidates = lines.filter((_, i) => lengths[i] > 0.9 * maxLen);
   if (candidates.length === 1) return candidates[0];
   const allPts = candidates.flat();
@@ -19,7 +20,7 @@ function pickMainAxis(lines: Point[][]): Point[] {
   let best = candidates[0];
   let bestDist = Infinity;
   for (const c of candidates) {
-    const minDist = Math.min(...c.map((p) => Math.hypot(p[0] - centroid[0], p[1] - centroid[1])));
+    const minDist = minOf(c.map((p) => Math.hypot(p[0] - centroid[0], p[1] - centroid[1])));
     if (minDist < bestDist) {
       bestDist = minDist;
       best = c;

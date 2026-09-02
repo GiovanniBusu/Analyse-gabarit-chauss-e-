@@ -4,6 +4,7 @@ import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
 import type { Point } from "../geometry";
 import { shapeVertices } from "./webIfcClient";
+import { maxOf, minOf, pushAll } from "../arrayUtils";
 
 export function clusterRingWidths(
   stations: number[],
@@ -32,7 +33,7 @@ export function clusterRingWidths(
     if (group.length < 2) continue;
     const groupOffsets = group.map((i) => offsetsSorted[i]);
     const groupStations = group.map((i) => stationsSorted[i]);
-    const width = Math.max(...groupOffsets) - Math.min(...groupOffsets);
+    const width = maxOf(groupOffsets) - minOf(groupOffsets);
     if (width >= plausibleRange[0] && width <= plausibleRange[1]) {
       const meanStation = groupStations.reduce((a, b) => a + b, 0) / groupStations.length;
       samples.push([meanStation, width]);
@@ -73,8 +74,8 @@ export function pcaAxisPolyline(verts: [number, number, number][], nBins = 40): 
   dy /= norm;
 
   const projection = centered.map(([x, y]) => x * dx + y * dy);
-  const minP = Math.min(...projection);
-  const maxP = Math.max(...projection);
+  const minP = minOf(projection);
+  const maxP = maxOf(projection);
   const binWidth = (maxP - minP) / nBins;
   const bins: Point[][] = Array.from({ length: nBins }, () => []);
   for (let i = 0; i < projection.length; i++) {
@@ -107,7 +108,7 @@ export function allVertices(
   for (const id of pavementExpressIds) {
     const v = shapeVertices(api, modelID, id);
     if (v) {
-      chunks.push(...v);
+      pushAll(chunks, v);
       total += v.length;
     }
     if (total >= maxVertices) break;
@@ -117,7 +118,7 @@ export function allVertices(
     for (const id of otherProductExpressIds()) {
       const v = shapeVertices(api, modelID, id);
       if (v) {
-        chunks.push(...v);
+        pushAll(chunks, v);
         total += v.length;
         count++;
       }
