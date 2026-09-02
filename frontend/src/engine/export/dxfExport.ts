@@ -57,6 +57,34 @@ function drawSeries(writer: DxfWriter, layer: string, points: [number, number][]
   }
 }
 
+/** Splits an ordered point sequence wherever consecutive points are
+ * disproportionately farther apart than the rest (more than 8x the median
+ * gap) — a real gap in coverage (no data over a stretch) or a single
+ * misclassified outlier sample both show up this way, and connecting
+ * across either with a straight line reads as a spurious streak cutting
+ * across the whole drawing rather than the actual boundary. Threshold
+ * scales with the data's own spacing instead of a fixed distance so it
+ * works whether points come from a dense IFC sampling or a coarse DXF step. */
+function splitPolylineByGap(points: readonly Point[]): Point[][] {
+  if (points.length < 3) return [points as Point[]];
+  const gaps = points.slice(1).map((p, i) => Math.hypot(p[0] - points[i][0], p[1] - points[i][1]));
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const threshold = Math.max(median * 8, 1e-6);
+
+  const runs: Point[][] = [];
+  let current: Point[] = [points[0]];
+  gaps.forEach((gap, i) => {
+    if (gap > threshold) {
+      runs.push(current);
+      current = [];
+    }
+    current.push(points[i + 1]);
+  });
+  runs.push(current);
+  return runs;
+}
+
 export function buildDxf(
   samples: WidthSample[],
   thresholds: Threshold[],
@@ -68,7 +96,7 @@ export function buildDxf(
 
   if (axisPoints && axisPoints.length >= 2) {
     const layer = writer.ensureLayer("AXE", 7);
-    writer.addPolyline(layer, axisPoints, 7);
+    for (const run of splitPolylineByGap(axisPoints)) writer.addPolyline(layer, run, 7);
   }
 
   if (options.includeExistant || options.includeProjet) {
@@ -76,6 +104,7 @@ export function buildDxf(
     const meta = new Map<string, [Side, ElementType, StateKind]>();
     for (const s of samples) {
       if (s.width_m == null) continue;
+      if (s.element_type === "non_utilise") continue;
       if (s.state === "existant" && !options.includeExistant) continue;
       if (s.state === "projet" && !options.includeProjet) continue;
       const key = `${s.side}|${s.element_type}|${s.state}`;
@@ -102,8 +131,8 @@ export function buildDxf(
           for (const [x, y] of [...nearLine, ...farLine]) writer.addPoint(layer, x, y, color);
         }
         if (options.includePolylines) {
-          writer.addPolyline(layer, nearLine, color);
-          writer.addPolyline(layer, farLine, color);
+          for (const run of splitPolylineByGap(nearLine)) writer.addPolyline(layer, run, color);
+          for (const run of splitPolylineByGap(farLine)) writer.addPolyline(layer, run, color);
         }
       } else {
         // Schematic fallback (pk, largeur) — no boundary geometry available
@@ -133,6 +162,7 @@ export function buildDxf(
     const byGroup = new Map<string, [number, number, number][]>();
     for (const row of comparisonRows) {
       if (row.delta == null || row.status == null) continue;
+      if (row.element_type === "non_utilise") continue;
       const key = `${row.side}|${row.element_type}`;
       if (!byGroup.has(key)) byGroup.set(key, []);
       byGroup.get(key)!.push([row.pk, row.delta, ACI_STATUS[row.status]]);

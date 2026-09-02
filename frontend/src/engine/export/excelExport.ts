@@ -196,19 +196,39 @@ export async function buildWorkbook(
       });
     }
 
+    // Synthèse par côté + élément — une ligne globale (toutes bandes
+    // confondues) ne dit pas si c'est le BAU gauche ou le trottoir droit qui
+    // s'est dégradé ; ces COUNTIFS filtrent par Côté (colonne B) et Élément
+    // (colonne C) en plus du Statut (colonne G), comme les autres formules
+    // de ce classeur — live, pas figées.
     const synthCol = 9;
-    comparatifWs.getCell(1, synthCol).value = "Synthèse";
-    comparatifWs.getCell(1, synthCol).font = HEADER_FONT;
-    const labels: ["Amélioré", "Inchangé", "Dégradé"] = ["Amélioré", "Inchangé", "Dégradé"];
-    labels.forEach((label, i) => {
+    const synthHeaders = ["Côté", "Élément", "Amélioré", "Inchangé", "Dégradé"];
+    synthHeaders.forEach((h, i) => {
+      const cell = comparatifWs.getCell(1, synthCol + i);
+      cell.value = h;
+      cell.font = HEADER_FONT;
+      cell.fill = HEADER_FILL;
+    });
+    const dataRange = Math.max(lastRow, 2);
+    const sideCol = colLetter(2);
+    const typeCol = colLetter(3);
+    const statutCol = colLetter(7);
+    const synthKeys = Array.from(
+      new Set(sorted.map((r) => `${r.side}|${r.element_type}`)),
+    ).map((k) => k.split("|") as [Side, ElementType]);
+    const statusLabels: ["Amélioré", "Inchangé", "Dégradé"] = ["Amélioré", "Inchangé", "Dégradé"];
+    synthKeys.forEach(([side, et], i) => {
       const r = i + 2;
-      comparatifWs.getCell(r, synthCol).value = label;
-      comparatifWs.getCell(r, synthCol + 1).value = {
-        formula: `COUNTIF($G$2:$G$${Math.max(lastRow, 2)},"${label}")`,
-      };
+      comparatifWs.getCell(r, synthCol).value = SIDE_LABEL[side];
+      comparatifWs.getCell(r, synthCol + 1).value = TYPE_LABEL[et];
+      statusLabels.forEach((label, j) => {
+        comparatifWs.getCell(r, synthCol + 2 + j).value = {
+          formula: `COUNTIFS($${sideCol}$2:$${sideCol}$${dataRange},"${SIDE_LABEL[side]}",$${typeCol}$2:$${typeCol}$${dataRange},"${TYPE_LABEL[et]}",$${statutCol}$2:$${statutCol}$${dataRange},"${label}")`,
+        };
+      });
     });
 
-    for (let c = 1; c <= 10; c++) comparatifWs.getColumn(c).width = 20;
+    for (let c = 1; c <= synthCol + synthHeaders.length; c++) comparatifWs.getColumn(c).width = 20;
   }
 
   return wb;
