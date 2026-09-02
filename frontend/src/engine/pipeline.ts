@@ -9,6 +9,7 @@ import { extractDxfState } from "./dxf/dxfExtractor";
 import { buildAxisReferenceFromIfcModel } from "./ifc/axisReferenceIfc";
 import { extractIfcState } from "./ifc/ifcExtractor";
 import { getIfcApi, openModel } from "./ifc/webIfcClient";
+import type { Point } from "./geometry";
 import type { Band, StateKind, WidthSample } from "../types/domain";
 
 export type SourceFormat = "dxf" | "ifc";
@@ -33,6 +34,10 @@ export interface ExtractionResult {
   projetMode: string;
   bands: Band[];
   samples: WidthSample[];
+  /** The shared reference axis, in true plan (x, y) — drawn as its own
+   * layer in the DXF export so the plan-view reconstruction has a spatial
+   * reference, the same way it does in the source DXF/IFC files. */
+  axisPoints: Point[];
 }
 
 export async function runExtraction(
@@ -84,5 +89,6 @@ export async function runExtraction(
     projetMode: projetResult.mode,
     bands: [...existantResult.bands, ...projetResult.bands],
     samples: [...existantResult.samples, ...projetResult.samples],
+    axisPoints: axis.axis.points,
   };
 }

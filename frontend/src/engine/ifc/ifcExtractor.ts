@@ -5,7 +5,7 @@ import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
 import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } from "../../types/domain";
 import { attrRef, attrRefList, attrString, shapeVertices } from "./webIfcClient";
-import { pavementWidthSamples } from "./ifcGeometry";
+import { pavementWidthSamples, type PlanWidthSample } from "./ifcGeometry";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
 
 const KEYWORD_HINTS: [RegExp, ElementType][] = [
@@ -157,11 +157,11 @@ export function extractIfcState(
     }
 
     const widths: number[] = [];
-    const pkWidthPairs: [number, number][] = [];
+    const planSamples: PlanWidthSample[] = [];
     for (const id of group.expressIds) {
-      pushAll(pkWidthPairs, pavementWidthSamples(api, modelID, id, axis));
+      pushAll(planSamples, pavementWidthSamples(api, modelID, id, axis));
     }
-    for (const [, w] of pkWidthPairs) widths.push(w);
+    for (const s of planSamples) widths.push(s.width);
 
     bands.push({
       band_id: bandId,
@@ -176,8 +176,20 @@ export function extractIfcState(
       width_max: widths.length ? maxOf(widths) : null,
       width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
     });
-    for (const [pk, width] of pkWidthPairs) {
-      samples.push({ pk, side, element_type: elementType, state, width_m: width, source, band_id: bandId });
+    for (const s of planSamples) {
+      samples.push({
+        pk: s.pk,
+        side,
+        element_type: elementType,
+        state,
+        width_m: s.width,
+        source,
+        band_id: bandId,
+        near_x: s.near[0],
+        near_y: s.near[1],
+        far_x: s.far[0],
+        far_y: s.far[1],
+      });
     }
   }
   return { bands, samples };

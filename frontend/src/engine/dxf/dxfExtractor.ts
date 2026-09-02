@@ -111,7 +111,19 @@ function extractHeuristic(
       const width = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
       const pk = axis.stationToPk(s);
       widths.push(width);
-      samples.push({ pk, side, element_type: elementType, state, width_m: width, source, band_id: bandKey });
+      samples.push({
+        pk,
+        side,
+        element_type: elementType,
+        state,
+        width_m: width,
+        source,
+        band_id: bandKey,
+        near_x: p1[0],
+        near_y: p1[1],
+        far_x: p2[0],
+        far_y: p2[1],
+      });
     }
 
     bands.push({
