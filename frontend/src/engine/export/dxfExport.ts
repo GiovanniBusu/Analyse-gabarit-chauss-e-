@@ -23,6 +23,14 @@ const ACI_RATIO_ENTRE = 2;
 const ACI_RATIO_STANDARD = 3;
 const ACI_STATUS: Record<ComparisonStatus, number> = { ameliore: 3, degrade: 1, inchange: 8 };
 
+// Distinct color per (état, côté) combination — coloring by état alone made
+// gauche and droite series render identically, so the two sides couldn't be
+// told apart in a DXF viewer even though the layers are named separately.
+const SERIES_COLOR: Record<StateKind, Record<Side, number>> = {
+  existant: { gauche: 5, droite: 4 }, // blue / cyan
+  projet: { gauche: 3, droite: 2 }, // green / yellow
+};
+
 export interface DxfExportOptions {
   includePoints: boolean;
   includePolylines: boolean;
@@ -65,8 +73,8 @@ export function buildDxf(
     }
     for (const [key, points] of byGroup.entries()) {
       const [side, elementType, state] = meta.get(key)!;
-      const layer = writer.ensureLayer(`${STATE_TAG[state]}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`, state === "existant" ? 5 : 3);
-      const color = state === "existant" ? 5 : 3;
+      const color = SERIES_COLOR[state][side];
+      const layer = writer.ensureLayer(`${STATE_TAG[state]}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`, color);
       drawSeries(writer, layer, points, color, options);
     }
   }
