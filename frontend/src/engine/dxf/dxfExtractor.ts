@@ -5,6 +5,7 @@ import { PolylineIndex, orderLinesByOffset, perpendicularDirection, type Point }
 import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } from "../../types/domain";
 import { parseDxf } from "./dxfReader";
 import { findLegacyPolylines, namedAxisAndCoteLayers, numericValue } from "./dxfCommon";
+import { maxOf, minOf } from "../arrayUtils";
 
 const ROUTE_TEMPLATE_HALF: ElementType[] = ["accotement", "trottoir", "cycle", "voie"];
 const AUTOROUTE_TEMPLATE_HALF: ElementType[] = ["accotement", "bau", "voie", "voie"];
@@ -122,8 +123,8 @@ function extractHeuristic(
       confidence,
       label_hint: `bande géométrique #${bandIdx}`,
       sample_count: widths.length,
-      width_min: widths.length ? Math.min(...widths) : null,
-      width_max: widths.length ? Math.max(...widths) : null,
+      width_min: widths.length ? minOf(widths) : null,
+      width_max: widths.length ? maxOf(widths) : null,
       width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
     });
   }
@@ -183,8 +184,8 @@ function extractLayerBased(
       confidence,
       label_hint: layerName,
       sample_count: widths.length,
-      width_min: widths.length ? Math.min(...widths) : null,
-      width_max: widths.length ? Math.max(...widths) : null,
+      width_min: widths.length ? minOf(widths) : null,
+      width_max: widths.length ? maxOf(widths) : null,
       width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
     });
   }

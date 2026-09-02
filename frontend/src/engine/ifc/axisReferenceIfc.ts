@@ -6,6 +6,7 @@ import { AxisReference } from "../axisReference";
 import { PolylineIndex, type Point } from "../geometry";
 import { attrRef, attrRefList } from "./webIfcClient";
 import { allVertices, pcaAxisPolyline } from "./ifcGeometry";
+import { pushAll } from "../arrayUtils";
 
 function allExpressIdsOfType(api: IfcAPI, modelID: number, type: number): number[] {
   const ids = api.GetLineIDsWithType(modelID, type, true);
@@ -36,7 +37,7 @@ function alignmentPolyline(api: IfcAPI, modelID: number, alignmentId: number): P
     const childrenOf = (parentId: number): number[] => {
       const out: number[] = [];
       for (const rel of nests) {
-        if (attrRef(rel, "RelatingObject") === parentId) out.push(...attrRefList(rel, "RelatedObjects"));
+        if (attrRef(rel, "RelatingObject") === parentId) pushAll(out, attrRefList(rel, "RelatedObjects"));
       }
       return out;
     };

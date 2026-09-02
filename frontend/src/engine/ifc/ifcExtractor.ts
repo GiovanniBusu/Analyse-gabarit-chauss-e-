@@ -6,6 +6,7 @@ import type { AxisReference } from "../axisReference";
 import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } from "../../types/domain";
 import { attrRef, attrRefList, attrString, shapeVertices } from "./webIfcClient";
 import { pavementWidthSamples } from "./ifcGeometry";
+import { maxOf, minOf, pushAll } from "../arrayUtils";
 
 const KEYWORD_HINTS: [RegExp, ElementType][] = [
   [/bau/i, "bau"],
@@ -149,7 +150,7 @@ export function extractIfcState(
     const widths: number[] = [];
     const pkWidthPairs: [number, number][] = [];
     for (const id of group.expressIds) {
-      pkWidthPairs.push(...pavementWidthSamples(api, modelID, id, axis));
+      pushAll(pkWidthPairs, pavementWidthSamples(api, modelID, id, axis));
     }
     for (const [, w] of pkWidthPairs) widths.push(w);
 
@@ -162,8 +163,8 @@ export function extractIfcState(
       confidence,
       label_hint: group.typeName,
       sample_count: widths.length,
-      width_min: widths.length ? Math.min(...widths) : null,
-      width_max: widths.length ? Math.max(...widths) : null,
+      width_min: widths.length ? minOf(widths) : null,
+      width_max: widths.length ? maxOf(widths) : null,
       width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
     });
     for (const [pk, width] of pkWidthPairs) {
