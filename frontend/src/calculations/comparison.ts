@@ -31,7 +31,7 @@ export function compareStates(samples: WidthSample[], deltaSeuilM: number): Comp
   const keyOf = (side: Side, et: ElementType, state: StateKind) => `${side}|${et}|${state}`;
 
   const sorted = [...samples]
-    .filter((s) => s.width_m != null)
+    .filter((s) => s.width_m != null && s.element_type !== "non_utilise")
     .sort((a, b) => a.pk - b.pk);
 
   for (const s of sorted) {

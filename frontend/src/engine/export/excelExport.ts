@@ -10,6 +10,11 @@ const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: 
 const INPUT_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
 const AMELIORE_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
 const DEGRADE_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+// Same rouge/orange/vert convention as the DXF Ratios layer (dxfExport.ts'
+// classify()): < réduit / [réduit, standard) / >= standard.
+const SOUS_REDUIT_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+const ENTRE_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE699" } };
+const STANDARD_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
 const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true };
 
 const SIDE_LABEL: Record<Side, string> = { gauche: "Gauche", droite: "Droite" };
@@ -49,9 +54,24 @@ export async function buildWorkbook(
 ): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
 
+  // "Non utilisé" bands are explicitly outside the gabarit analysis scope
+  // (see dxfExport.ts) — excluded here for the same reason, so they don't
+  // clutter Données/Résultats/Comparatif with columns nobody asked to see.
+  const relevantSamples = samples.filter((s) => s.element_type !== "non_utilise");
+
+  // Row of each element type on the Seuils sheet, fixed by ELEMENT_ORDER —
+  // computed up front (independent of the sheet itself) so Données' per-cell
+  // color coding can reference the same threshold cells the Seuils sheet
+  // will contain, without having to build that sheet first.
+  const thresholdCellByType = new Map<ElementType, [string, string]>();
+  ELEMENT_ORDER.forEach((et, i) => {
+    const row = 2 + i;
+    thresholdCellByType.set(et, [`Seuils!$B$${row}`, `Seuils!$C$${row}`]);
+  });
+
   const groups = new Map<string, Map<number, number>>();
   const groupMeta = new Map<string, [Side, ElementType, StateKind]>();
-  for (const s of samples) {
+  for (const s of relevantSamples) {
     if (s.width_m == null) continue;
     const key = `${s.side}|${s.element_type}|${s.state}`;
     if (!groups.has(key)) {
@@ -91,10 +111,36 @@ export async function buildWorkbook(
       }
     });
     donneesWs.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+
+    // Same rouge/orange/vert code as the DXF Ratios layer, applied directly
+    // to each width cell so the two exports read the same way at a glance.
+    if (masterPks.length > 0) {
+      const lastRow = 1 + masterPks.length;
+      for (const key of groupKeys) {
+        const [, et] = groupMeta.get(key)!;
+        const thresholdCells = thresholdCellByType.get(et);
+        if (!thresholdCells) continue;
+        const [reduitCell, standardCell] = thresholdCells;
+        const col = colLetter(columnOfGroup.get(key)!);
+        const ref = `${col}2:${col}${lastRow}`;
+        donneesWs.addConditionalFormatting({
+          ref,
+          rules: [
+            { type: "expression", formulae: [`AND($${col}2<>"",$${col}2<${reduitCell})`], style: { fill: SOUS_REDUIT_FILL }, priority: 1 },
+            {
+              type: "expression",
+              formulae: [`AND($${col}2<>"",$${col}2>=${reduitCell},$${col}2<${standardCell})`],
+              style: { fill: ENTRE_FILL },
+              priority: 2,
+            },
+            { type: "expression", formulae: [`AND($${col}2<>"",$${col}2>=${standardCell})`], style: { fill: STANDARD_FILL }, priority: 3 },
+          ],
+        });
+      }
+    }
   }
 
   const seuilsWs = wb.addWorksheet("Seuils");
-  const thresholdCellByType = new Map<ElementType, [string, string]>();
   let deltaCell = "Seuils!$B$1";
   {
     seuilsWs.getCell(1, 1).value = "Élément";
