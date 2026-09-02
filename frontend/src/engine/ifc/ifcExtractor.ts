@@ -4,7 +4,7 @@ import * as WebIFC from "web-ifc";
 import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
 import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } from "../../types/domain";
-import { attrRef, attrRefList, attrString, shapeVertices } from "./webIfcClient";
+import { attrRef, attrRefList, attrString } from "./webIfcClient";
 import { pavementWidthSamples, type PlanWidthSample } from "./ifcGeometry";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
 
@@ -26,7 +26,6 @@ export function guessElementType(typeName: string): [ElementType, number] {
 
 interface PavementGroup {
   typeName: string;
-  side: Side;
   expressIds: number[];
 }
 
@@ -77,14 +76,13 @@ function buildParentMap(api: IfcAPI, modelID: number): Map<number, number> {
   return parentMap;
 }
 
-/** Groups by (type name, côté) rather than type name alone: a real IFC export
- * typically gives both lanes of a road the same IfcPavementType (e.g. a single
- * "Voie" type used on both sides), so grouping by type name only would merge
- * the left and right pavements into one band and force a single side label
- * onto their combined geometry — losing one side entirely. Side is guessed
- * per individual pavement product, before grouping, so left and right stay
- * distinct bands even when they share a type name. */
-function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind, axis: AxisReference): PavementGroup[] {
+/** Groups by type name only. Side is *not* decided here: a real IFC export
+ * can put both lanes of a road under the same IfcPavementType, or even model
+ * both sides as one compound product's mesh (e.g. "all accotements" as one
+ * part) — so which physical side a piece of geometry is on can only be
+ * determined per width sample (see pavementWidthSamples' offset-gap split in
+ * ifcGeometry.ts), not once per product or per type name. */
+function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind): PavementGroup[] {
   const pavementIds = api.GetLineIDsWithType(modelID, WebIFC.IFCPAVEMENT, true);
   const ids: number[] = [];
   for (let i = 0; i < pavementIds.size(); i++) ids.push(pavementIds.get(i));
@@ -101,26 +99,10 @@ function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind, axis
     if (hasDualState && !matchesState(roadNames.get(id) ?? null, state)) continue;
     const line = api.GetLine(modelID, id) as Record<string, unknown>;
     const typeName = pavementTypeName(api, modelID, line, id);
-    const side = guessSide(api, modelID, [id], axis);
-    const key = `${typeName}|${side}`;
-    if (!groups.has(key)) groups.set(key, { typeName, side, expressIds: [] });
-    groups.get(key)!.expressIds.push(id);
+    if (!groups.has(typeName)) groups.set(typeName, { typeName, expressIds: [] });
+    groups.get(typeName)!.expressIds.push(id);
   }
   return Array.from(groups.values());
-}
-
-function guessSide(api: IfcAPI, modelID: number, expressIds: number[], axis: AxisReference): Side {
-  const offsets: number[] = [];
-  for (const id of expressIds) {
-    const verts = shapeVertices(api, modelID, id);
-    if (!verts) continue;
-    const step = Math.max(1, Math.floor(verts.length / 50));
-    for (let i = 0; i < verts.length; i += step) {
-      offsets.push(axis.axis.projectPoint([verts[i][0], verts[i][1]])[1]);
-    }
-  }
-  const mean = offsets.length ? offsets.reduce((a, b) => a + b, 0) / offsets.length : 0;
-  return mean >= 0 ? "gauche" : "droite";
 }
 
 function slugify(name: string): string {
@@ -137,59 +119,66 @@ export function extractIfcState(
   axis: AxisReference,
   typeMapping: Map<string, [Side, ElementType]> = new Map(),
 ): { bands: Band[]; samples: WidthSample[] } {
-  const groups = listPavementGroups(api, modelID, state, axis);
+  const groups = listPavementGroups(api, modelID, state);
 
   const bands: Band[] = [];
   const samples: WidthSample[] = [];
   for (const group of groups) {
-    const bandId = `ifc-${state}-${slugify(group.typeName)}-${group.side}`;
-    let side: Side = group.side;
-    let elementType: ElementType;
-    let source: SourceMethod;
-    let confidence: number;
-    if (typeMapping.has(bandId)) {
-      [side, elementType] = typeMapping.get(bandId)!;
-      source = "recuperation_entrees";
-      confidence = 1.0;
-    } else {
-      [elementType, confidence] = guessElementType(group.typeName);
-      source = "recuperation_dxf";
-    }
-
-    const widths: number[] = [];
-    const planSamples: PlanWidthSample[] = [];
+    const allSamples: PlanWidthSample[] = [];
     for (const id of group.expressIds) {
-      pushAll(planSamples, pavementWidthSamples(api, modelID, id, axis));
+      pushAll(allSamples, pavementWidthSamples(api, modelID, id, axis));
     }
-    for (const s of planSamples) widths.push(s.width);
 
-    bands.push({
-      band_id: bandId,
-      state,
-      side,
-      element_type: elementType,
-      source,
-      confidence,
-      label_hint: group.typeName,
-      sample_count: widths.length,
-      width_min: widths.length ? minOf(widths) : null,
-      width_max: widths.length ? maxOf(widths) : null,
-      width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
-    });
-    for (const s of planSamples) {
-      samples.push({
-        pk: s.pk,
+    const bySide = new Map<Side, PlanWidthSample[]>();
+    for (const s of allSamples) {
+      if (!bySide.has(s.side)) bySide.set(s.side, []);
+      bySide.get(s.side)!.push(s);
+    }
+
+    for (const [autoSide, sideSamples] of bySide.entries()) {
+      const bandId = `ifc-${state}-${slugify(group.typeName)}-${autoSide}`;
+      let side: Side = autoSide;
+      let elementType: ElementType;
+      let source: SourceMethod;
+      let confidence: number;
+      if (typeMapping.has(bandId)) {
+        [side, elementType] = typeMapping.get(bandId)!;
+        source = "recuperation_entrees";
+        confidence = 1.0;
+      } else {
+        [elementType, confidence] = guessElementType(group.typeName);
+        source = "recuperation_dxf";
+      }
+
+      const widths = sideSamples.map((s) => s.width);
+      bands.push({
+        band_id: bandId,
+        state,
         side,
         element_type: elementType,
-        state,
-        width_m: s.width,
         source,
-        band_id: bandId,
-        near_x: s.near[0],
-        near_y: s.near[1],
-        far_x: s.far[0],
-        far_y: s.far[1],
+        confidence,
+        label_hint: group.typeName,
+        sample_count: widths.length,
+        width_min: widths.length ? minOf(widths) : null,
+        width_max: widths.length ? maxOf(widths) : null,
+        width_mean: widths.length ? widths.reduce((a, b) => a + b, 0) / widths.length : null,
       });
+      for (const s of sideSamples) {
+        samples.push({
+          pk: s.pk,
+          side,
+          element_type: elementType,
+          state,
+          width_m: s.width,
+          source,
+          band_id: bandId,
+          near_x: s.near[0],
+          near_y: s.near[1],
+          far_x: s.far[0],
+          far_y: s.far[1],
+        });
+      }
     }
   }
   return { bands, samples };

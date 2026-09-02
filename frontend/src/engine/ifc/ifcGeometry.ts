@@ -3,8 +3,9 @@
 import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
 import { perpendicularDirection, type Point } from "../geometry";
-import { shapeVertices } from "./webIfcClient";
+import { shapeVertexGroups, shapeVertices } from "./webIfcClient";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
+import type { Side } from "../../types/domain";
 
 export interface RingWidth {
   station: number;
@@ -15,6 +16,10 @@ export interface RingWidth {
    * points of this ring, not just its scalar width. */
   offsetNear: number;
   offsetFar: number;
+  /** gauche/droite of this specific ring, from the sign of offsetFar — see
+   * clusterRingWidths' offset-gap split for why side can't be decided once
+   * per whole product. */
+  side: Side;
 }
 
 export function clusterRingWidths(
@@ -50,7 +55,7 @@ export function clusterRingWidths(
     if (width >= plausibleRange[0] && width <= plausibleRange[1]) {
       const meanStation = groupStations.reduce((a, b) => a + b, 0) / groupStations.length;
       const [offsetNear, offsetFar] = Math.abs(offsetMin) <= Math.abs(offsetMax) ? [offsetMin, offsetMax] : [offsetMax, offsetMin];
-      samples.push({ station: meanStation, width, offsetNear, offsetFar });
+      samples.push({ station: meanStation, width, offsetNear, offsetFar, side: offsetFar >= 0 ? "gauche" : "droite" });
     }
   }
   return samples;
@@ -146,6 +151,7 @@ export function allVertices(
 export interface PlanWidthSample {
   pk: number;
   width: number;
+  side: Side;
   /** True (x, y) boundary points of this ring, reconstructed from the axis
    * at this station — used to redraw the road in plan (see dxfExport.ts)
    * instead of only a schematic (pk, width) chart. */
@@ -153,6 +159,15 @@ export interface PlanWidthSample {
   far: Point;
 }
 
+/** A single IfcPavement product can carry more than one physically disjoint
+ * solid in its shape representation — e.g. a compound "Accotements" product
+ * with a separate item per side of the road. Flattening all of a product's
+ * vertices together before clustering would merge such disjoint pieces into
+ * one bogus, oversized ring (there is no single distance threshold that
+ * reliably tells "the near/far edge of one wide band" apart from "two
+ * separate bands sitting far apart"). So each geometry item is projected and
+ * clustered independently, and the results concatenated — real connectivity
+ * from the file decides what's one piece, not a guessed gap size. */
 export function pavementWidthSamples(
   api: IfcAPI,
   modelID: number,
@@ -161,21 +176,27 @@ export function pavementWidthSamples(
   gapThresholdM = 1.5,
   plausibleRange: [number, number] = [0.1, 20.0],
 ): PlanWidthSample[] {
-  const verts = shapeVertices(api, modelID, expressID);
-  if (!verts || verts.length < 2) return [];
-  const stations: number[] = [];
-  const offsets: number[] = [];
-  for (const v of verts) {
-    const [s, o] = axis.axis.projectPoint([v[0], v[1]]);
-    stations.push(s);
-    offsets.push(o);
+  const vertexGroups = shapeVertexGroups(api, modelID, expressID);
+  if (!vertexGroups) return [];
+
+  const result: PlanWidthSample[] = [];
+  for (const verts of vertexGroups) {
+    if (verts.length < 2) continue;
+    const stations: number[] = [];
+    const offsets: number[] = [];
+    for (const v of verts) {
+      const [s, o] = axis.axis.projectPoint([v[0], v[1]]);
+      stations.push(s);
+      offsets.push(o);
+    }
+    const rings = clusterRingWidths(stations, offsets, gapThresholdM, plausibleRange);
+    for (const { station, width, offsetNear, offsetFar, side } of rings) {
+      const { point, direction } = axis.axis.pointAndDirectionAtStation(station);
+      const perp = perpendicularDirection(direction);
+      const near: Point = [point[0] + offsetNear * perp[0], point[1] + offsetNear * perp[1]];
+      const far: Point = [point[0] + offsetFar * perp[0], point[1] + offsetFar * perp[1]];
+      result.push({ pk: axis.stationToPk(station), width, side, near, far });
+    }
   }
-  const rings = clusterRingWidths(stations, offsets, gapThresholdM, plausibleRange);
-  return rings.map(({ station, width, offsetNear, offsetFar }) => {
-    const { point, direction } = axis.axis.pointAndDirectionAtStation(station);
-    const perp = perpendicularDirection(direction);
-    const near: Point = [point[0] + offsetNear * perp[0], point[1] + offsetNear * perp[1]];
-    const far: Point = [point[0] + offsetFar * perp[0], point[1] + offsetFar * perp[1]];
-    return { pk: axis.stationToPk(station), width, near, far };
-  });
+  return result;
 }
