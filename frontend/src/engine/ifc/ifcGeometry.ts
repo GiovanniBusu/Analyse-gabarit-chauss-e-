@@ -10,15 +10,19 @@ import type { Side } from "../../types/domain";
 export interface RingWidth {
   station: number;
   width: number;
-  /** Signed axis offsets bounding this ring — offsetNear has the smaller
-   * absolute value (closer to the axis), offsetFar the larger. Kept
-   * alongside width so callers can reconstruct the true plan-view boundary
-   * points of this ring, not just its scalar width. */
-  offsetNear: number;
-  offsetFar: number;
-  /** gauche/droite of this specific ring, from the sign of offsetFar — see
-   * clusterRingWidths' offset-gap split for why side can't be decided once
-   * per whole product. */
+  /** Signed axis offsets bounding this ring. offsetMin/offsetMax keep a
+   * *stable* identity (the algebraically smaller/larger offset) rather than
+   * a "near/far from axis" one — picking near/far by absolute value flips
+   * which physical edge each field represents whenever a ring is close to
+   * straddling the axis (common for a central "voie" band), and connecting
+   * such flip-flopping points into one polyline draws a zigzag instead of a
+   * smooth boundary. This mirrors the DXF heuristic extractor's own
+   * convention (orderLinesByOffset: always low-offset-line first). */
+  offsetMin: number;
+  offsetMax: number;
+  /** gauche/droite of this specific ring, from the sign of the ring's mean
+   * offset — see clusterRingWidths' offset-gap split for why side can't be
+   * decided once per whole product. */
   side: Side;
 }
 
@@ -54,8 +58,8 @@ export function clusterRingWidths(
     const width = offsetMax - offsetMin;
     if (width >= plausibleRange[0] && width <= plausibleRange[1]) {
       const meanStation = groupStations.reduce((a, b) => a + b, 0) / groupStations.length;
-      const [offsetNear, offsetFar] = Math.abs(offsetMin) <= Math.abs(offsetMax) ? [offsetMin, offsetMax] : [offsetMax, offsetMin];
-      samples.push({ station: meanStation, width, offsetNear, offsetFar, side: offsetFar >= 0 ? "gauche" : "droite" });
+      const side: Side = offsetMin + offsetMax >= 0 ? "gauche" : "droite";
+      samples.push({ station: meanStation, width, offsetMin, offsetMax, side });
     }
   }
   return samples;
@@ -154,7 +158,9 @@ export interface PlanWidthSample {
   side: Side;
   /** True (x, y) boundary points of this ring, reconstructed from the axis
    * at this station — used to redraw the road in plan (see dxfExport.ts)
-   * instead of only a schematic (pk, width) chart. */
+   * instead of only a schematic (pk, width) chart. `near` always comes from
+   * offsetMin and `far` from offsetMax (see RingWidth) — a stable identity,
+   * not literal distance from the axis. */
   near: Point;
   far: Point;
 }
@@ -190,11 +196,11 @@ export function pavementWidthSamples(
       offsets.push(o);
     }
     const rings = clusterRingWidths(stations, offsets, gapThresholdM, plausibleRange);
-    for (const { station, width, offsetNear, offsetFar, side } of rings) {
+    for (const { station, width, offsetMin, offsetMax, side } of rings) {
       const { point, direction } = axis.axis.pointAndDirectionAtStation(station);
       const perp = perpendicularDirection(direction);
-      const near: Point = [point[0] + offsetNear * perp[0], point[1] + offsetNear * perp[1]];
-      const far: Point = [point[0] + offsetFar * perp[0], point[1] + offsetFar * perp[1]];
+      const near: Point = [point[0] + offsetMin * perp[0], point[1] + offsetMin * perp[1]];
+      const far: Point = [point[0] + offsetMax * perp[0], point[1] + offsetMax * perp[1]];
       result.push({ pk: axis.stationToPk(station), width, side, near, far });
     }
   }
