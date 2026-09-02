@@ -5,6 +5,7 @@
  * same shape backend/app/extraction/ifc_extractor.py works with. */
 
 import * as WebIFC from "web-ifc";
+import { pushAll } from "../arrayUtils";
 
 let apiPromise: Promise<WebIFC.IfcAPI> | null = null;
 
@@ -64,22 +65,41 @@ function applyTransform(m: number[], x: number, y: number, z: number): [number, 
  * (web-ifc's Y-up output has z_webifc = -y_ifc, y_webifc = z_ifc — see
  * engine/ifc/README notes / IFC2CLOUD's own documented axis convention). */
 export function shapeVertices(api: WebIFC.IfcAPI, modelID: number, expressID: number): [number, number, number][] | null {
+  const groups = shapeVertexGroups(api, modelID, expressID);
+  if (!groups) return null;
+  const out: [number, number, number][] = [];
+  for (const g of groups) pushAll(out, g);
+  return out;
+}
+
+/** Like shapeVertices, but keeps each `mesh.geometries` entry (one placed
+ * solid "item" of the product's shape representation) as its own array
+ * instead of flattening them together. A single IfcPavement product can
+ * carry more than one such item to model physically disjoint pieces (e.g.
+ * one compound "Accotements" product with a separate solid per side of the
+ * road) — callers that need to reason about which vertices are actually
+ * connected (width/cross-section extraction) must keep them apart; callers
+ * that only need an unstructured point cloud (PCA axis fallback) can still
+ * use the flattened shapeVertices. */
+export function shapeVertexGroups(api: WebIFC.IfcAPI, modelID: number, expressID: number): [number, number, number][][] | null {
   let mesh: WebIFC.FlatMesh;
   try {
     mesh = api.GetFlatMesh(modelID, expressID);
   } catch {
     return null;
   }
-  const out: [number, number, number][] = [];
+  const groups: [number, number, number][][] = [];
   for (let g = 0; g < mesh.geometries.size(); g++) {
     const placed = mesh.geometries.get(g);
     const geom = api.GetGeometry(modelID, placed.geometryExpressID);
     const verts = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
+    const group: [number, number, number][] = [];
     // interleaved: position(3) + normal(3) per vertex
     for (let i = 0; i + 5 < verts.length; i += 6) {
       const [wx, wy, wz] = applyTransform(placed.flatTransformation, verts[i], verts[i + 1], verts[i + 2]);
-      out.push([wx, -wz, wy]);
+      group.push([wx, -wz, wy]);
     }
+    if (group.length > 0) groups.push(group);
   }
-  return out.length > 0 ? out : null;
+  return groups.length > 0 ? groups : null;
 }
