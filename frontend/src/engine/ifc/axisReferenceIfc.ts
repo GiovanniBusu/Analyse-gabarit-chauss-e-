@@ -69,29 +69,36 @@ function alignmentPolyline(api: IfcAPI, modelID: number, alignmentId: number): P
  * direction (fine for a roughly straight corridor, unreliable once it
  * curves enough that two points on different bends project to nearly the
  * same scalar), this only ever looks at real proximity, so it follows
- * curves correctly regardless of their shape. Starting point is the
- * leftmost (ties broken by y) purely so the same input always produces the
- * same chain — which physical end that is doesn't matter, since nothing
+ * curves correctly regardless of their shape. Works in full 3D (x, y,
+ * height): a road passing under a bridge, or over/under itself at an
+ * interchange, can put two real path segments close together in plan while
+ * they sit at very different elevations — 2D-only proximity would treat
+ * them as neighbors and produce a visible kink where the chain jumps
+ * between levels. Starting point is the one with the smallest x (ties
+ * broken by y, then z) purely so the same input always produces the same
+ * chain — which physical end that is doesn't matter, since nothing
  * downstream depends on the axis's tracing direction. */
-function nearestNeighborChain(points: Point[]): Point[] {
+function nearestNeighborChain(points: [number, number, number][]): [number, number, number][] {
   if (points.length < 2) return points;
   let startIdx = 0;
   for (let i = 1; i < points.length; i++) {
-    if (points[i][0] < points[startIdx][0] || (points[i][0] === points[startIdx][0] && points[i][1] < points[startIdx][1])) {
+    const a = points[i];
+    const b = points[startIdx];
+    if (a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2])))) {
       startIdx = i;
     }
   }
 
   const remaining = new Set(points.map((_, i) => i));
-  const chain: Point[] = [points[startIdx]];
+  const chain: [number, number, number][] = [points[startIdx]];
   remaining.delete(startIdx);
   while (remaining.size > 0) {
-    const [cx, cy] = chain[chain.length - 1];
+    const [cx, cy, cz] = chain[chain.length - 1];
     let bestIdx = -1;
     let bestDist = Infinity;
     for (const idx of remaining) {
-      const [x, y] = points[idx];
-      const d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      const [x, y, z] = points[idx];
+      const d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
       if (d < bestDist) {
         bestDist = d;
         bestIdx = idx;
@@ -111,11 +118,11 @@ function nearestNeighborChain(points: Point[]): Point[] {
  * (more than 6x the median segment length) and keeps the longest piece,
  * rather than let a handful of outliers balloon the axis length and shift
  * every station computed from it. */
-function trimOutlierEnds(chain: Point[]): Point[] {
+function trimOutlierEnds(chain: [number, number, number][]): [number, number, number][] {
   if (chain.length < 3) return chain;
   const segLens: number[] = [];
   for (let i = 1; i < chain.length; i++) {
-    segLens.push(Math.hypot(chain[i][0] - chain[i - 1][0], chain[i][1] - chain[i - 1][1]));
+    segLens.push(Math.hypot(chain[i][0] - chain[i - 1][0], chain[i][1] - chain[i - 1][1], chain[i][2] - chain[i - 1][2]));
   }
   const sorted = [...segLens].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
@@ -177,7 +184,8 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
   // length and distort every station downstream.
   const centroids = productCentroids(api, modelID, allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT));
   const chain = nearestNeighborChain(centroids);
-  const pts = trimOutlierEnds(chain);
-  const axis = new PolylineIndex(pts.length >= 2 ? pts : chain);
+  const trimmed = trimOutlierEnds(chain);
+  const pts: Point[] = (trimmed.length >= 2 ? trimmed : chain).map(([x, y]) => [x, y]);
+  const axis = new PolylineIndex(pts);
   return new AxisReference(axis, 1.0, 0.0, "relative");
 }

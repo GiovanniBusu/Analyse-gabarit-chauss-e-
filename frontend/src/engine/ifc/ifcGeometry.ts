@@ -125,19 +125,28 @@ export function pcaAxisPolyline(verts: [number, number, number][], nBins = 40): 
  * actually runs. A centroid per marker is cheap, one point per real
  * station, and lets pcaAxisPolyline use a bin count that actually matches
  * how many stations exist instead of a fixed, often far-too-coarse default. */
-export function productCentroids(api: IfcAPI, modelID: number, expressIds: Iterable<number>, maxProducts = 2000): Point[] {
-  const centroids: Point[] = [];
+/** Height is kept alongside (x, y) — not for width/PK math, which stays
+ * planar throughout this engine, but because ordering markers into a path
+ * by (x, y) proximity alone can jump between two real path segments that
+ * are close in plan but sit at different elevations (a road passing under
+ * a bridge, or over/under itself at an interchange): they'd otherwise look
+ * like neighbors. Chaining in 3D (see nearestNeighborChain) keeps them
+ * apart; the final axis then drops height once ordering is settled. */
+export function productCentroids(api: IfcAPI, modelID: number, expressIds: Iterable<number>, maxProducts = 2000): [number, number, number][] {
+  const centroids: [number, number, number][] = [];
   let count = 0;
   for (const id of expressIds) {
     const verts = shapeVertices(api, modelID, id);
     if (verts && verts.length > 0) {
       let sx = 0;
       let sy = 0;
+      let sz = 0;
       for (const v of verts) {
         sx += v[0];
         sy += v[1];
+        sz += v[2];
       }
-      centroids.push([sx / verts.length, sy / verts.length]);
+      centroids.push([sx / verts.length, sy / verts.length, sz / verts.length]);
     }
     count++;
     if (count >= maxProducts) break;
