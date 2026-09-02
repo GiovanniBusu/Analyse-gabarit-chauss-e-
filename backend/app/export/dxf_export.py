@@ -40,6 +40,14 @@ _ACI_STATUS = {
     ComparisonStatus.INCHANGE: 8,  # gray
 }
 
+# Distinct color per (état, côté) combination -- coloring by état alone made
+# gauche and droite series render identically, so the two sides couldn't be
+# told apart in a DXF viewer even though the layers are named separately.
+_SERIES_COLOR = {
+    StateKind.EXISTANT: {Side.GAUCHE: 5, Side.DROITE: 4},  # blue / cyan
+    StateKind.PROJET: {Side.GAUCHE: 3, Side.DROITE: 2},  # green / yellow
+}
+
 
 @dataclass
 class DxfExportOptions:
@@ -89,8 +97,8 @@ def build_dxf(
                 continue
             by_group[(s.side, s.element_type, s.state)].append((s.pk, s.width_m))
         for (side, element_type, state), points in by_group.items():
-            layer = _ensure_layer(doc, f"{_STATE_TAG[state]}_{_SIDE_TAG[side]}_{_TYPE_TAG[element_type]}")
-            color = 5 if state == StateKind.EXISTANT else 3
+            color = _SERIES_COLOR[state][side]
+            layer = _ensure_layer(doc, f"{_STATE_TAG[state]}_{_SIDE_TAG[side]}_{_TYPE_TAG[element_type]}", color=color)
             _draw_series(msp, layer, points, color, options)
 
     if options.include_ratios:
