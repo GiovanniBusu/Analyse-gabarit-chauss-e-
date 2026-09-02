@@ -115,6 +115,36 @@ export function pcaAxisPolyline(verts: [number, number, number][], nBins = 40): 
   return pts;
 }
 
+/** One representative point (the centroid of its own vertices) per product,
+ * instead of every raw vertex. A dedicated "axes + profils" reference file
+ * with no IfcAlignment/IfcPavement typically carries its stationing as many
+ * small marker products (e.g. IfcAnnotation cross-section ticks) placed
+ * along the true corridor — flattening all of their raw mesh vertices
+ * together (allVertices) dilutes the point cloud with each marker's own
+ * triangulation density, which has nothing to do with where the corridor
+ * actually runs. A centroid per marker is cheap, one point per real
+ * station, and lets pcaAxisPolyline use a bin count that actually matches
+ * how many stations exist instead of a fixed, often far-too-coarse default. */
+export function productCentroids(api: IfcAPI, modelID: number, expressIds: Iterable<number>, maxProducts = 2000): Point[] {
+  const centroids: Point[] = [];
+  let count = 0;
+  for (const id of expressIds) {
+    const verts = shapeVertices(api, modelID, id);
+    if (verts && verts.length > 0) {
+      let sx = 0;
+      let sy = 0;
+      for (const v of verts) {
+        sx += v[0];
+        sy += v[1];
+      }
+      centroids.push([sx / verts.length, sy / verts.length]);
+    }
+    count++;
+    if (count >= maxProducts) break;
+  }
+  return centroids;
+}
+
 /** Bounded on purpose — see backend/app/extraction/ifc_geometry.py's
  * all_vertices docstring: without a cap, a reference file with no
  * IfcPavement falls through to triangulating every IfcProduct in the model. */

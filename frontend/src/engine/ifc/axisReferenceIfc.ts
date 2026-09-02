@@ -5,7 +5,7 @@ import type { IfcAPI } from "web-ifc";
 import { AxisReference } from "../axisReference";
 import { PolylineIndex, type Point } from "../geometry";
 import { attrRef, attrRefList } from "./webIfcClient";
-import { allVertices, pcaAxisPolyline } from "./ifcGeometry";
+import { allVertices, pcaAxisPolyline, productCentroids } from "./ifcGeometry";
 import { pushAll } from "../arrayUtils";
 
 function allExpressIdsOfType(api: IfcAPI, modelID: number, type: number): number[] {
@@ -64,6 +64,84 @@ function alignmentPolyline(api: IfcAPI, modelID: number, alignmentId: number): P
   return null;
 }
 
+/** Orders a scattered point cloud into a path by repeatedly walking to the
+ * closest not-yet-used point — unlike projecting onto a single global
+ * direction (fine for a roughly straight corridor, unreliable once it
+ * curves enough that two points on different bends project to nearly the
+ * same scalar), this only ever looks at real proximity, so it follows
+ * curves correctly regardless of their shape. Starting point is the
+ * leftmost (ties broken by y) purely so the same input always produces the
+ * same chain — which physical end that is doesn't matter, since nothing
+ * downstream depends on the axis's tracing direction. */
+function nearestNeighborChain(points: Point[]): Point[] {
+  if (points.length < 2) return points;
+  let startIdx = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i][0] < points[startIdx][0] || (points[i][0] === points[startIdx][0] && points[i][1] < points[startIdx][1])) {
+      startIdx = i;
+    }
+  }
+
+  const remaining = new Set(points.map((_, i) => i));
+  const chain: Point[] = [points[startIdx]];
+  remaining.delete(startIdx);
+  while (remaining.size > 0) {
+    const [cx, cy] = chain[chain.length - 1];
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (const idx of remaining) {
+      const [x, y] = points[idx];
+      const d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = idx;
+      }
+    }
+    chain.push(points[bestIdx]);
+    remaining.delete(bestIdx);
+  }
+  return chain;
+}
+
+/** A nearest-neighbor chain over real-world data rarely covers every input
+ * point cleanly: a stray marker unrelated to the sequential corridor chain
+ * (a legend, an out-of-place annotation, …) gets stranded until the greedy
+ * walk is finally forced to jump to it, showing up as one segment far
+ * longer than the rest. Cuts the chain at any such disproportionate jump
+ * (more than 6x the median segment length) and keeps the longest piece,
+ * rather than let a handful of outliers balloon the axis length and shift
+ * every station computed from it. */
+function trimOutlierEnds(chain: Point[]): Point[] {
+  if (chain.length < 3) return chain;
+  const segLens: number[] = [];
+  for (let i = 1; i < chain.length; i++) {
+    segLens.push(Math.hypot(chain[i][0] - chain[i - 1][0], chain[i][1] - chain[i - 1][1]));
+  }
+  const sorted = [...segLens].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const threshold = Math.max(median * 6, 5);
+
+  const breaks: number[] = [];
+  segLens.forEach((len, i) => {
+    if (len > threshold) breaks.push(i);
+  });
+  if (breaks.length === 0) return chain;
+
+  const boundaries = [-1, ...breaks, segLens.length];
+  let bestStart = 0;
+  let bestCount = 0;
+  for (let k = 0; k < boundaries.length - 1; k++) {
+    const start = boundaries[k] + 1;
+    const end = boundaries[k + 1];
+    const count = end - start + 1;
+    if (count > bestCount) {
+      bestCount = count;
+      bestStart = start;
+    }
+  }
+  return chain.slice(bestStart, bestStart + bestCount);
+}
+
 export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): AxisReference {
   const alignmentIds = allExpressIdsOfType(api, modelID, WebIFC.IFCALIGNMENT);
   if (alignmentIds.length > 0) {
@@ -75,10 +153,31 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
   }
 
   const pavementIds = allExpressIdsOfType(api, modelID, WebIFC.IFCPAVEMENT);
-  const verts = allVertices(api, modelID, pavementIds, function* () {
-    for (const id of allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT)) yield id;
-  });
-  const pts = pcaAxisPolyline(verts);
-  const axis = new PolylineIndex(pts);
+  if (pavementIds.length > 0) {
+    const verts = allVertices(api, modelID, pavementIds, function* () {});
+    const pts = pcaAxisPolyline(verts);
+    const axis = new PolylineIndex(pts);
+    return new AxisReference(axis, 1.0, 0.0, "relative");
+  }
+
+  // No IfcAlignment, no IfcPavement: this is typically a dedicated
+  // "axes + profils" reference file whose only geometry is many small
+  // cross-section marker products spread along the true corridor (see
+  // productCentroids' docstring). A single global PCA direction is a poor
+  // *ordering* key once the corridor curves enough — projecting onto one
+  // straight scalar interleaves markers from different bends, which reads
+  // as a dense zigzag once connected. Chain the markers by proximity
+  // instead (greedy nearest-neighbor): each next point is simply the
+  // closest not-yet-used marker to the current chain end, which follows a
+  // curve correctly regardless of its shape. A marker or two that's a
+  // stray outlier (not part of the sequential chain at all — e.g. an
+  // unrelated annotation far from the corridor) then shows up as one very
+  // long segment at the point the greedy walk is forced to jump to it;
+  // trimOutlierEnds cuts those off rather than let them balloon the axis
+  // length and distort every station downstream.
+  const centroids = productCentroids(api, modelID, allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT));
+  const chain = nearestNeighborChain(centroids);
+  const pts = trimOutlierEnds(chain);
+  const axis = new PolylineIndex(pts.length >= 2 ? pts : chain);
   return new AxisReference(axis, 1.0, 0.0, "relative");
 }
