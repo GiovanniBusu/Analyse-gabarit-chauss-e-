@@ -33,7 +33,7 @@ def test_extract_ifc_state_widths_and_auto_guess(tmp_ifc_path):
 
 def test_extract_ifc_state_respects_user_type_mapping(tmp_ifc_path):
     axis = build_axis_reference_from_ifc(tmp_ifc_path)
-    mapping = {"ifc-existant-voie_gauche": (Side.GAUCHE, ElementType.TROTTOIR)}  # deliberately override the auto-guess
+    mapping = {"ifc-existant-voie_gauche-gauche": (Side.GAUCHE, ElementType.TROTTOIR)}  # deliberately override the auto-guess
     bands, _samples = extract_ifc_state(tmp_ifc_path, StateKind.EXISTANT, axis, type_mapping=mapping)
     by_hint = {b.label_hint: b for b in bands}
     assert by_hint["Voie Gauche"].element_type == ElementType.TROTTOIR

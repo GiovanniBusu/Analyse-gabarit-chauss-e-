@@ -26,6 +26,7 @@ export function guessElementType(typeName: string): [ElementType, number] {
 
 interface PavementGroup {
   typeName: string;
+  side: Side;
   expressIds: number[];
 }
 
@@ -76,7 +77,14 @@ function buildParentMap(api: IfcAPI, modelID: number): Map<number, number> {
   return parentMap;
 }
 
-function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind): PavementGroup[] {
+/** Groups by (type name, côté) rather than type name alone: a real IFC export
+ * typically gives both lanes of a road the same IfcPavementType (e.g. a single
+ * "Voie" type used on both sides), so grouping by type name only would merge
+ * the left and right pavements into one band and force a single side label
+ * onto their combined geometry — losing one side entirely. Side is guessed
+ * per individual pavement product, before grouping, so left and right stay
+ * distinct bands even when they share a type name. */
+function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind, axis: AxisReference): PavementGroup[] {
   const pavementIds = api.GetLineIDsWithType(modelID, WebIFC.IFCPAVEMENT, true);
   const ids: number[] = [];
   for (let i = 0; i < pavementIds.size(); i++) ids.push(pavementIds.get(i));
@@ -93,8 +101,10 @@ function listPavementGroups(api: IfcAPI, modelID: number, state: StateKind): Pav
     if (hasDualState && !matchesState(roadNames.get(id) ?? null, state)) continue;
     const line = api.GetLine(modelID, id) as Record<string, unknown>;
     const typeName = pavementTypeName(api, modelID, line, id);
-    if (!groups.has(typeName)) groups.set(typeName, { typeName, expressIds: [] });
-    groups.get(typeName)!.expressIds.push(id);
+    const side = guessSide(api, modelID, [id], axis);
+    const key = `${typeName}|${side}`;
+    if (!groups.has(key)) groups.set(key, { typeName, side, expressIds: [] });
+    groups.get(key)!.expressIds.push(id);
   }
   return Array.from(groups.values());
 }
@@ -127,13 +137,13 @@ export function extractIfcState(
   axis: AxisReference,
   typeMapping: Map<string, [Side, ElementType]> = new Map(),
 ): { bands: Band[]; samples: WidthSample[] } {
-  const groups = listPavementGroups(api, modelID, state);
+  const groups = listPavementGroups(api, modelID, state, axis);
 
   const bands: Band[] = [];
   const samples: WidthSample[] = [];
   for (const group of groups) {
-    const bandId = `ifc-${state}-${slugify(group.typeName)}`;
-    let side: Side;
+    const bandId = `ifc-${state}-${slugify(group.typeName)}-${group.side}`;
+    let side: Side = group.side;
     let elementType: ElementType;
     let source: SourceMethod;
     let confidence: number;
@@ -143,7 +153,6 @@ export function extractIfcState(
       confidence = 1.0;
     } else {
       [elementType, confidence] = guessElementType(group.typeName);
-      side = guessSide(api, modelID, group.expressIds, axis);
       source = "recuperation_dxf";
     }
 
