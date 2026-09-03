@@ -109,6 +109,15 @@ export interface ComparisonRow {
   width_projet?: number | null;
   delta?: number | null;
   status?: ComparisonStatus | null;
+  // Plan-view (true x, y) boundary points at this row's PK, for drawing the
+  // Comparatif DXF layer "en situation" like Ratios/Existant/Projet — every
+  // row's pk exactly matches an original WidthSample's own pk (see
+  // compareStates), so these are that sample's own near/far, not a new
+  // interpolation.
+  near_x?: number | null;
+  near_y?: number | null;
+  far_x?: number | null;
+  far_y?: number | null;
 }
 
 export type UploadRole = "axes_profils" | "existant" | "projet";

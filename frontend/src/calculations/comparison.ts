@@ -26,7 +26,7 @@ function interpolate(pk: number, pks: number[], widths: number[]): number | null
 }
 
 export function compareStates(samples: WidthSample[], deltaSeuilM: number): ComparisonRow[] {
-  type Group = { pks: number[]; widths: number[] };
+  type Group = { pks: number[]; widths: number[]; byPk: Map<number, WidthSample> };
   const byGroup = new Map<string, Group>();
   const keyOf = (side: Side, et: ElementType, state: StateKind) => `${side}|${et}|${state}`;
 
@@ -36,10 +36,11 @@ export function compareStates(samples: WidthSample[], deltaSeuilM: number): Comp
 
   for (const s of sorted) {
     const key = keyOf(s.side, s.element_type, s.state);
-    if (!byGroup.has(key)) byGroup.set(key, { pks: [], widths: [] });
+    if (!byGroup.has(key)) byGroup.set(key, { pks: [], widths: [], byPk: new Map() });
     const g = byGroup.get(key)!;
     g.pks.push(s.pk);
     g.widths.push(s.width_m as number);
+    g.byPk.set(s.pk, s);
   }
 
   const pairKeys = new Set<string>();
@@ -48,8 +49,9 @@ export function compareStates(samples: WidthSample[], deltaSeuilM: number): Comp
   const rows: ComparisonRow[] = [];
   for (const pairKey of Array.from(pairKeys).sort()) {
     const [side, elementType] = pairKey.split("|") as [Side, ElementType];
-    const existant = byGroup.get(keyOf(side, elementType, "existant")) ?? { pks: [], widths: [] };
-    const projet = byGroup.get(keyOf(side, elementType, "projet")) ?? { pks: [], widths: [] };
+    const empty: Group = { pks: [], widths: [], byPk: new Map() };
+    const existant = byGroup.get(keyOf(side, elementType, "existant")) ?? empty;
+    const projet = byGroup.get(keyOf(side, elementType, "projet")) ?? empty;
     if (existant.pks.length === 0 && projet.pks.length === 0) continue;
 
     const allPks = Array.from(new Set([...existant.pks, ...projet.pks])).sort((a, b) => a - b);
@@ -64,7 +66,23 @@ export function compareStates(samples: WidthSample[], deltaSeuilM: number): Comp
         else if (delta < -deltaSeuilM) status = "degrade";
         else status = "inchange";
       }
-      rows.push({ pk, side, element_type: elementType, width_existant: wExist, width_projet: wProj, delta, status });
+      // Every pk here came verbatim from one state's own sample list, so
+      // that sample's own near/far is a real plan position — not a new
+      // interpolation — good enough to draw this row "en situation".
+      const origin = existant.byPk.get(pk) ?? projet.byPk.get(pk);
+      rows.push({
+        pk,
+        side,
+        element_type: elementType,
+        width_existant: wExist,
+        width_projet: wProj,
+        delta,
+        status,
+        near_x: origin?.near_x,
+        near_y: origin?.near_y,
+        far_x: origin?.far_x,
+        far_y: origin?.far_y,
+      });
     }
   }
   return rows;

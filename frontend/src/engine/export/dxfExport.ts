@@ -203,25 +203,58 @@ export function buildDxf(
   }
 
   if (options.includeComparatif && comparisonRows && comparisonRows.length > 0) {
-    const byGroup = new Map<string, [number, number, number][]>();
+    // Drawn at the row's true plan position, colored amélioré/inchangé/
+    // dégradé, exactly like the Ratios layer above — a row's pk always
+    // matches one original sample's own pk (see compareStates), so its
+    // near/far is a real plan position, not a new interpolation.
+    const byGroup = new Map<string, ComparisonRow[]>();
     for (const row of comparisonRows) {
       if (row.delta == null || row.status == null) continue;
       if (row.element_type === "non_utilise") continue;
       const key = `${row.side}|${row.element_type}`;
       if (!byGroup.has(key)) byGroup.set(key, []);
-      byGroup.get(key)!.push([row.pk, row.delta, ACI_STATUS[row.status]]);
+      byGroup.get(key)!.push(row);
     }
-    for (const [key, triples] of byGroup.entries()) {
+    for (const [key, groupRows] of byGroup.entries()) {
       const [side, elementType] = key.split("|") as [Side, ElementType];
       const layer = writer.ensureLayer(`COMPARATIF_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`);
-      if (options.includePoints) for (const [pk, delta, color] of triples) writer.addPoint(layer, pk, delta, color);
-      if (options.includePolylines && triples.length >= 2) {
-        const ordered = [...triples].sort((a, b) => a[0] - b[0]);
-        writer.addPolyline(
-          layer,
-          ordered.map(([pk, delta]) => [pk, delta] as [number, number]),
-          7,
-        );
+
+      const planRows = groupRows.filter(
+        (r): r is ComparisonRow & { near_x: number; near_y: number; far_x: number; far_y: number; status: ComparisonStatus } =>
+          r.near_x != null && r.near_y != null && r.far_x != null && r.far_y != null && r.status != null,
+      );
+      if (planRows.length >= 2) {
+        const ordered = [...planRows].sort((a, b) => a.pk - b.pk);
+        const centerline = ordered.map((r) => ({
+          point: [(r.near_x + r.far_x) / 2, (r.near_y + r.far_y) / 2] as [number, number],
+          color: ACI_STATUS[r.status],
+        }));
+        if (options.includePoints) {
+          for (const c of centerline) writer.addPoint(layer, c.point[0], c.point[1], c.color);
+        }
+        if (options.includePolylines) {
+          const gaps = centerline.slice(1).map((c, i) => Math.hypot(c.point[0] - centerline[i].point[0], c.point[1] - centerline[i].point[1]));
+          const sortedGaps = [...gaps].sort((a, b) => a - b);
+          const median = sortedGaps[Math.floor(sortedGaps.length / 2)] ?? 0;
+          const gapThreshold = Math.max(median * 8, 1e-6);
+          for (let i = 0; i < centerline.length - 1; i++) {
+            if (gaps[i] > gapThreshold) continue;
+            writer.addPolyline(layer, [centerline[i].point, centerline[i + 1].point], centerline[i].color);
+          }
+        }
+      } else {
+        // Schematic fallback (pk, delta) — no boundary geometry available
+        // for this band (DXF calque/cote mode).
+        const triples = groupRows.map((r) => [r.pk, r.delta as number, ACI_STATUS[r.status as ComparisonStatus]] as const);
+        if (options.includePoints) for (const [pk, delta, color] of triples) writer.addPoint(layer, pk, delta, color);
+        if (options.includePolylines && triples.length >= 2) {
+          const ordered = [...triples].sort((a, b) => a[0] - b[0]);
+          writer.addPolyline(
+            layer,
+            ordered.map(([pk, delta]) => [pk, delta] as [number, number]),
+            7,
+          );
+        }
       }
     }
   }
