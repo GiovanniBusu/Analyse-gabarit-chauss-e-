@@ -132,12 +132,40 @@ export function pcaAxisPolyline(verts: [number, number, number][], nBins = 40): 
  * a bridge, or over/under itself at an interchange): they'd otherwise look
  * like neighbors. Chaining in 3D (see nearestNeighborChain) keeps them
  * apart; the final axis then drops height once ordering is settled. */
+/** A real "axes + profils" reference file can carry, alongside the actual
+ * station markers, small decorative 3D symbols (a pin/flag/icon placed at
+ * each cross-section for visual annotation in the CAD viewer) — rounded
+ * shapes need many vertices to look smooth even though the symbol itself is
+ * tiny. Their centroid still lands roughly on the corridor, so mixing them
+ * in with the real markers doesn't look obviously wrong, but it hands
+ * nearestNeighborChain two redundant, slightly offset copies of the same
+ * path instead of one — which it cannot tell apart from two genuinely
+ * different stations, and ends up weaving between (see nearestNeighborChain's
+ * docstring). A real station/profile marker is a plan-scale object (it has
+ * to span enough of the cross-section to be visually meaningful); a symbol
+ * this dense per meter of its own bounding box has no such requirement, so
+ * it's excluded here rather than trusted as a second, competing station. */
+function isDecorativeSymbol(verts: [number, number, number][]): boolean {
+  if (verts.length <= 200) return false;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [x, y, z] of verts) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  const diagonal = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
+  return diagonal < 5;
+}
+
 export function productCentroids(api: IfcAPI, modelID: number, expressIds: Iterable<number>, maxProducts = 2000): [number, number, number][] {
   const centroids: [number, number, number][] = [];
   let count = 0;
   for (const id of expressIds) {
     const verts = shapeVertices(api, modelID, id);
-    if (verts && verts.length > 0) {
+    if (verts && verts.length > 0 && !isDecorativeSymbol(verts)) {
       let sx = 0;
       let sy = 0;
       let sz = 0;
