@@ -68,6 +68,31 @@ header h1 {
   color: #666;
 }
 
+.extraction-log {
+  margin-top: 12px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.85em;
+}
+
+.extraction-log summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #8d6e00;
+}
+
+.extraction-log ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.extraction-log li {
+  margin-bottom: 6px;
+  color: #5f4300;
+}
+
 .filename {
   display: block;
   margin-top: 6px;

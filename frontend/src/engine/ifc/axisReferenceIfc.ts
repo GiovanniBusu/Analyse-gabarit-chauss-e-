@@ -7,6 +7,7 @@ import { PolylineIndex, type Point } from "../geometry";
 import { attrRef, attrRefList } from "./webIfcClient";
 import { allVertices, pcaAxisPolyline, productCentroids } from "./ifcGeometry";
 import { pushAll } from "../arrayUtils";
+import { logIssue } from "../log";
 
 function allExpressIdsOfType(api: IfcAPI, modelID: number, type: number): number[] {
   const ids = api.GetLineIDsWithType(modelID, type, true);
@@ -146,6 +147,12 @@ function trimOutlierEnds(chain: [number, number, number][]): [number, number, nu
       bestStart = start;
     }
   }
+  const trimmedCount = chain.length - bestCount;
+  if (trimmedCount > 0) {
+    logIssue(
+      `${trimmedCount} marqueur(s) de profil écarté(s) de l'axe : isolé(s) du corridor principal (saut anormal dans le chaînage par proximité), probablement une annotation ou un marqueur hors tracé.`,
+    );
+  }
   return chain.slice(bestStart, bestStart + bestCount);
 }
 
@@ -157,6 +164,9 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
       const axis = new PolylineIndex(pts);
       return new AxisReference(axis, 1.0, 0.0, "profile_markers");
     }
+    logIssue(
+      "Le fichier contient un IfcAlignment mais sa géométrie horizontale (IfcAlignmentHorizontal) n'a pas pu être reconstruite — repli sur une autre méthode pour retrouver l'axe.",
+    );
   }
 
   const pavementIds = allExpressIdsOfType(api, modelID, WebIFC.IFCPAVEMENT);
@@ -164,6 +174,9 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
     const verts = allVertices(api, modelID, pavementIds, function* () {});
     const pts = pcaAxisPolyline(verts);
     const axis = new PolylineIndex(pts);
+    logIssue(
+      "Aucun IfcAlignment utilisable : axe reconstruit par analyse en composantes principales (PCA) du nuage de points IfcPavement — axe approximatif, sans PK réels (station relative depuis l'origine).",
+    );
     return new AxisReference(axis, 1.0, 0.0, "relative");
   }
 
@@ -180,6 +193,11 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
   // IfcReferent counts, and nothing else does.
   const referentIds = allExpressIdsOfType(api, modelID, WebIFC.IFCREFERENT);
   const markerIds = referentIds.length > 0 ? referentIds : allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT);
+  if (referentIds.length === 0) {
+    logIssue(
+      `Aucun IfcReferent (marqueur de profil officiel) trouvé dans le fichier : axe reconstruit heuristiquement à partir de ${markerIds.length} IfcProduct chaînés par proximité — fiabilité réduite par rapport à un export avec de vrais IfcReferent/IfcAlignment.`,
+    );
+  }
 
   // A single global PCA direction is a poor *ordering* key once the
   // corridor curves enough — projecting onto one straight scalar

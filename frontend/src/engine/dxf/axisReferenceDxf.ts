@@ -5,6 +5,7 @@ import { PolylineIndex, type Point } from "../geometry";
 import { parseDxf } from "./dxfReader";
 import { clusterTexts, isPureInt, numericValue } from "./dxfCommon";
 import { maxOf, minOf } from "../arrayUtils";
+import { logIssue } from "../log";
 
 function pickMainAxis(lines: Point[][]): Point[] {
   if (lines.length === 0) throw new Error("No legacy POLYLINE entities found to serve as axis");
@@ -59,6 +60,9 @@ export function buildAxisReferenceFromDxfContent(content: string, pkStepHint?: n
     if (isSequential && (!bestCluster || cluster.length > bestCluster.length)) bestCluster = cluster;
   }
   if (bestCluster) {
+    logIssue(
+      "Aucune étiquette de PK explicite (valeur > 100) trouvée dans le DXF : axe calé sur une numérotation séquentielle de profils (1, 2, 3, …) avec un pas estimé — vérifier que le pas déduit correspond bien au pas réel des profils.",
+    );
     const ordered = [...bestCluster].sort((a, b) => parseInt(a.content, 10) - parseInt(b.content, 10));
     const stations = ordered.map((t) => axis.projectPoint([t.x, t.y])[0]);
     const numbers = ordered.map((t) => parseInt(t.content, 10));
@@ -74,5 +78,8 @@ export function buildAxisReferenceFromDxfContent(content: string, pkStepHint?: n
   }
 
   // 3) fallback: relative station, origin at axis start
+  logIssue(
+    "Aucune étiquette de PK ni numérotation de profils exploitable trouvée dans le DXF : la station reste relative depuis l'origine de l'axe (pas de PK réel).",
+  );
   return new AxisReference(axis, 1.0, 0.0, "relative");
 }

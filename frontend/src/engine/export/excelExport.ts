@@ -6,6 +6,7 @@
 import ExcelJS from "exceljs";
 import type { ComparisonRow, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
 import { ACI, ACI_STATUS, SERIES_COLOR, aciToArgb } from "./colorScheme";
+import type { LogEntry } from "../log";
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
 const INPUT_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
@@ -52,6 +53,7 @@ export async function buildWorkbook(
   thresholds: Threshold[],
   deltaSeuilM: number,
   comparisonRows: ComparisonRow[],
+  log: LogEntry[] = [],
 ): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
 
@@ -292,6 +294,28 @@ export async function buildWorkbook(
     });
 
     for (let c = 1; c <= synthCol + synthHeaders.length; c++) comparatifWs.getColumn(c).width = 20;
+  }
+
+  if (log.length > 0) {
+    // A persistent, printable record of everything the extraction had to
+    // guess or found missing — the DXF/IFC files disappear once the
+    // workbook is filed away, this sheet doesn't.
+    const journalWs = wb.addWorksheet("Journal");
+    const headers = ["Fichier", "Information manquante ou déduite"];
+    headers.forEach((h, i) => {
+      const cell = journalWs.getCell(1, i + 1);
+      cell.value = h;
+      cell.font = HEADER_FONT;
+      cell.fill = HEADER_FILL;
+    });
+    log.forEach((entry, i) => {
+      const r = i + 2;
+      journalWs.getCell(r, 1).value = entry.context;
+      journalWs.getCell(r, 2).value = entry.message;
+      journalWs.getCell(r, 2).alignment = { wrapText: true, vertical: "top" };
+    });
+    journalWs.getColumn(1).width = 30;
+    journalWs.getColumn(2).width = 110;
   }
 
   return wb;

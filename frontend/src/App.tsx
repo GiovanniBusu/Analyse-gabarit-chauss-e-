@@ -12,6 +12,7 @@ import { extractInWorker, fileToInput } from "./engine/worker/extractionClient";
 import { buildWorkbook } from "./engine/export/excelExport";
 import { buildDxf, type DxfExportOptions } from "./engine/export/dxfExport";
 import type { Point } from "./engine/geometry";
+import type { LogEntry } from "./engine/log";
 import type { Band, ElementType, Side, Threshold, UploadRole, WidthSample } from "./types/domain";
 import { DEFAULT_DELTA_SEUIL_M, DEFAULT_THRESHOLDS } from "./types/domain";
 
@@ -26,6 +27,7 @@ function App() {
   const [samples, setSamples] = useState<WidthSample[]>([]);
   const [axisConfidence, setAxisConfidence] = useState<string | null>(null);
   const [axisPoints, setAxisPoints] = useState<Point[]>([]);
+  const [extractionLog, setExtractionLog] = useState<LogEntry[]>([]);
   const [thresholds, setThresholds] = useState<Threshold[]>(DEFAULT_THRESHOLDS);
   const [deltaSeuilM, setDeltaSeuilM] = useState(DEFAULT_DELTA_SEUIL_M);
   const [tab, setTab] = useState<Tab>("mapping");
@@ -57,6 +59,7 @@ function App() {
       setSamples(res.samples);
       setAxisConfidence(res.axisConfidence);
       setAxisPoints(res.axisPoints);
+      setExtractionLog(res.log);
       setTab("mapping");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -94,7 +97,7 @@ function App() {
 
   const handleExportExcel = async () => {
     try {
-      const wb = await buildWorkbook(samples, thresholds, deltaSeuilM, comparisonRows);
+      const wb = await buildWorkbook(samples, thresholds, deltaSeuilM, comparisonRows, extractionLog);
       const buffer = await wb.xlsx.writeBuffer();
       downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "analyse_gabarit.xlsx");
     } catch (e) {
@@ -168,6 +171,21 @@ function App() {
             {axisConfidence === "profile_markers" &&
               "(axe reconstruit à partir des marqueurs de profil du fichier — aucune valeur de PK réelle n'y est stockée, donc la station reste relative depuis l'origine)"}
           </p>
+        )}
+        {extractionLog.length > 0 && (
+          <details className="extraction-log">
+            <summary>
+              Journal d'extraction — {extractionLog.length} information{extractionLog.length > 1 ? "s" : ""} manquante
+              {extractionLog.length > 1 ? "s" : ""} ou déduite{extractionLog.length > 1 ? "s" : ""} dans les fichiers
+            </summary>
+            <ul>
+              {extractionLog.map((entry, i) => (
+                <li key={i}>
+                  <strong>{entry.context}</strong> — {entry.message}
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </section>
 

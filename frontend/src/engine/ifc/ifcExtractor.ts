@@ -141,7 +141,7 @@ export function extractIfcState(
       // density, so widths are directly comparable across bands and N no
       // longer depends on how finely one particular product happened to be
       // triangulated (see resampleAtStations' docstring).
-      const sideSamples = resampleAtStations(rawSideSamples, axis, axis.axis.cumLength);
+      const sideSamples = resampleAtStations(rawSideSamples, axis, axis.axis.cumLength, `${group.typeName} (${autoSide})`);
       const bandId = `ifc-${state}-${slugify(group.typeName)}-${autoSide}`;
       let side: Side = autoSide;
       let elementType: ElementType;

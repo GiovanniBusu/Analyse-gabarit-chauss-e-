@@ -11,6 +11,7 @@ import { extractIfcState } from "./ifc/ifcExtractor";
 import { getIfcApi, openModel } from "./ifc/webIfcClient";
 import type { Point } from "./geometry";
 import type { Band, StateKind, WidthSample } from "../types/domain";
+import { getLog, resetLog, setLogContext, type LogEntry } from "./log";
 
 export type SourceFormat = "dxf" | "ifc";
 
@@ -38,6 +39,11 @@ export interface ExtractionResult {
    * layer in the DXF export so the plan-view reconstruction has a spatial
    * reference, the same way it does in the source DXF/IFC files. */
   axisPoints: Point[];
+  /** Notices raised while parsing the three files about anything that had
+   * to be guessed or was missing outright (no real PK markers, a fallback
+   * axis method, geometry excluded as decorative, an unmeasurable profile,
+   * …) — see log.ts. */
+  log: LogEntry[];
 }
 
 export async function runExtraction(
@@ -48,11 +54,13 @@ export async function runExtraction(
   dxfStepM: number | null,
   wasmBaseUrl: string,
 ): Promise<ExtractionResult> {
+  resetLog();
   const needsIfc = [axesProfils, existant, projet].some((f) => f.format === "ifc");
   const api = needsIfc ? await getIfcApi(wasmBaseUrl) : null;
   const openedModelIds: number[] = [];
 
   let axis: AxisReference;
+  setLogContext(`Axe / profils (${axesProfils.filename})`);
   if (axesProfils.format === "dxf") {
     axis = buildAxisReferenceFromDxfContent(axesProfils.text as string);
   } else {
@@ -72,7 +80,9 @@ export async function runExtraction(
     return { bands, samples, mode: "ifc" };
   }
 
+  setLogContext(`Existant (${existant.filename})`);
   const existantResult = extractOne(existant, "existant");
+  setLogContext(`Projet (${projet.filename})`);
   const projetResult = extractOne(projet, "projet");
 
   for (const id of openedModelIds) {
@@ -90,5 +100,6 @@ export async function runExtraction(
     bands: [...existantResult.bands, ...projetResult.bands],
     samples: [...existantResult.samples, ...projetResult.samples],
     axisPoints: axis.axis.points,
+    log: getLog(),
   };
 }
