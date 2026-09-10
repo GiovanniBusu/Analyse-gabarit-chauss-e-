@@ -7,7 +7,7 @@ interface ExtractRequest {
   existant: FileInput;
   projet: FileInput;
   gabarit: string;
-  dxfStepM: number;
+  dxfStepM: number | null;
   wasmBaseUrl: string;
 }
 

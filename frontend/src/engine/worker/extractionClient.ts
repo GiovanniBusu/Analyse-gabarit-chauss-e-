@@ -33,7 +33,7 @@ export function extractInWorker(
   existant: FileInput,
   projet: FileInput,
   gabarit: string,
-  dxfStepM: number,
+  dxfStepM: number | null,
 ): Promise<ExtractionResult> {
   const w = getWorker();
   const requestId = ++counter;
