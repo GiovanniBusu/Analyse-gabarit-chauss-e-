@@ -8,13 +8,21 @@
  * writing an accented or non-ASCII character straight through comes back
  * as mojibake in most viewers (confirmed: "réduit" round-tripped through
  * ezdxf as "rÃ©duit"). Transliterating to plain ASCII sidesteps needing
- * either party to agree on an encoding or escape convention. */
+ * either party to agree on an encoding or escape convention. Punctuation
+ * substitutions (em/en dash, ellipsis, arrow) matter as much as the
+ * diacritic stripping below once real prose — the extraction log's
+ * messages, comparison pair labels like "Existant → Projet V0" — started
+ * getting written as DXF text instead of just short legend labels. */
 function toDxfAscii(text: string): string {
   return text
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "") // combining diacritical marks left behind by NFD (é -> e + ´ -> e)
     .replace(/≤/g, "<=")
-    .replace(/≥/g, ">=");
+    .replace(/≥/g, ">=")
+    .replace(/→/g, "->")
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...")
+    .replace(/[«»]/g, '"');
 }
 
 interface LayerDef {

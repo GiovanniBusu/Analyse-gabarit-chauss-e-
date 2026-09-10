@@ -13,7 +13,12 @@ const SLOTS: { role: UploadRole; label: string; help: string }[] = [
     help: "Base de calcul obligatoire : axe et calibration PK (DXF ou IFC)",
   },
   { role: "existant", label: "2. Existant", help: "État actuel de la route (DXF ou IFC)" },
-  { role: "projet", label: "3. Projet", help: "État projeté à comparer (DXF ou IFC)" },
+  { role: "projet", label: "3. Projet V0", help: "Premier état projeté à comparer (DXF ou IFC)" },
+  {
+    role: "projet_v1",
+    label: "4. Projet V1 (facultatif)",
+    help: "Deuxième version du projet, pour comparer Existant / Projet V0 / Projet V1 — laisser vide si non applicable",
+  },
 ];
 
 export default function UploadPanel({ onUpload, uploaded }: Props) {

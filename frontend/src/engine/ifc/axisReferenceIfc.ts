@@ -150,7 +150,7 @@ function trimOutlierEnds(chain: [number, number, number][]): [number, number, nu
   const trimmedCount = chain.length - bestCount;
   if (trimmedCount > 0) {
     logIssue(
-      `${trimmedCount} marqueur(s) de profil écarté(s) de l'axe : isolé(s) du corridor principal (saut anormal dans le chaînage par proximité), probablement une annotation ou un marqueur hors tracé.`,
+      `${trimmedCount} objet(s) trouvé(s) loin du tracé principal de la route ont été ignorés (probablement une annotation ou un élément mal placé dans le fichier).`,
     );
   }
   return chain.slice(bestStart, bestStart + bestCount);
@@ -165,7 +165,7 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
       return new AxisReference(axis, 1.0, 0.0, "profile_markers");
     }
     logIssue(
-      "Le fichier contient un IfcAlignment mais sa géométrie horizontale (IfcAlignmentHorizontal) n'a pas pu être reconstruite — repli sur une autre méthode pour retrouver l'axe.",
+      "L'axe de la route n'a pas pu être lu directement dans le fichier : l'outil a dû le retrouver par une autre méthode, moins précise.",
     );
   }
 
@@ -175,7 +175,7 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
     const pts = pcaAxisPolyline(verts);
     const axis = new PolylineIndex(pts);
     logIssue(
-      "Aucun IfcAlignment utilisable : axe reconstruit par analyse en composantes principales (PCA) du nuage de points IfcPavement — axe approximatif, sans PK réels (station relative depuis l'origine).",
+      "Le fichier ne contient pas d'axe utilisable : l'outil a recalculé un axe approximatif à partir de la forme générale de la route. Les PK affichés ne sont pas les vrais PK du projet, juste une distance comptée depuis le début.",
     );
     return new AxisReference(axis, 1.0, 0.0, "relative");
   }
@@ -195,7 +195,7 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
   const markerIds = referentIds.length > 0 ? referentIds : allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT);
   if (referentIds.length === 0) {
     logIssue(
-      `Aucun IfcReferent (marqueur de profil officiel) trouvé dans le fichier : axe reconstruit heuristiquement à partir de ${markerIds.length} IfcProduct chaînés par proximité — fiabilité réduite par rapport à un export avec de vrais IfcReferent/IfcAlignment.`,
+      `Le fichier ne contient pas de vrais repères de profils en travers : l'outil a deviné le tracé de l'axe en reliant ${markerIds.length} objet(s) proches les uns des autres. Résultat moins fiable qu'un fichier avec de vrais repères de profil.`,
     );
   }
 

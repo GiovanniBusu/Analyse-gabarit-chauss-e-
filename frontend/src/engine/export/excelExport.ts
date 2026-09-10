@@ -5,7 +5,8 @@
 
 import ExcelJS from "exceljs";
 import type { ComparisonRow, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
-import { ACI, ACI_STATUS, SERIES_COLOR, aciToArgb } from "./colorScheme";
+import { STATE_LABELS } from "../../types/domain";
+import { ACI, ACI_STATUS, SERIES_COLOR, aciToArgb, contrastTextArgb } from "./colorScheme";
 import type { LogEntry } from "../log";
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
@@ -19,6 +20,15 @@ const ENTRE_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: {
 const STANDARD_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
 const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true };
 
+/** Header cell colored to match a state/ratio/statut's own DXF color — a
+ * solid fill instead of colored text on a plain background, since text-only
+ * coloring was hard to tell apart between close hues ("je ne vois pas la
+ * différence entre les couleurs trop proches"). */
+function colorFill(cell: ExcelJS.Cell, aci: number): void {
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: aciToArgb(aci) } };
+  cell.font = { ...HEADER_FONT, color: { argb: contrastTextArgb(aci) } };
+}
+
 const SIDE_LABEL: Record<Side, string> = { gauche: "Gauche", droite: "Droite" };
 const TYPE_LABEL: Record<ElementType, string> = {
   non_utilise: "Non utilisé",
@@ -29,12 +39,11 @@ const TYPE_LABEL: Record<ElementType, string> = {
   voie: "Voie",
   tpc: "TPC",
 };
-const STATE_LABEL: Record<StateKind, string> = { existant: "Existant", projet: "Projet" };
 
 const ELEMENT_ORDER: ElementType[] = ["accotement", "trottoir", "bau", "cycle", "voie", "tpc"];
 
 function groupKeyLabel(side: Side, elementType: ElementType, state: StateKind): string {
-  return `${SIDE_LABEL[side]} - ${TYPE_LABEL[elementType]} - ${STATE_LABEL[state]}`;
+  return `${SIDE_LABEL[side]} - ${TYPE_LABEL[elementType]} - ${STATE_LABELS[state]}`;
 }
 
 function colLetter(n: number): string {
@@ -103,8 +112,7 @@ export async function buildWorkbook(
       cell.value = groupKeyLabel(side, et, state);
       // Same color as this band's DXF layer (SERIES_COLOR), so the two
       // exports read as one system instead of two independent palettes.
-      cell.font = { ...HEADER_FONT, color: { argb: aciToArgb(SERIES_COLOR[state][side]) } };
-      cell.fill = HEADER_FILL;
+      colorFill(cell, SERIES_COLOR[state]);
       donneesWs.getColumn(col).width = 22;
     });
     masterPks.forEach((pk, rowIdx) => {
@@ -190,8 +198,11 @@ export async function buildWorkbook(
     headers.forEach((h, i) => {
       const cell = resultatsWs.getCell(1, i + 1);
       cell.value = h;
-      cell.font = i in headerColor ? { ...HEADER_FONT, color: { argb: aciToArgb(headerColor[i]) } } : HEADER_FONT;
-      cell.fill = HEADER_FILL;
+      if (i in headerColor) colorFill(cell, headerColor[i]);
+      else {
+        cell.font = HEADER_FONT;
+        cell.fill = HEADER_FILL;
+      }
     });
     let row = 2;
     for (const key of groupKeys) {
@@ -204,7 +215,7 @@ export async function buildWorkbook(
 
       resultatsWs.getCell(row, 1).value = SIDE_LABEL[side];
       resultatsWs.getCell(row, 2).value = TYPE_LABEL[et];
-      resultatsWs.getCell(row, 3).value = STATE_LABEL[state];
+      resultatsWs.getCell(row, 3).value = STATE_LABELS[state];
       resultatsWs.getCell(row, 4).value = { formula: `COUNT(${dataRange})` };
       resultatsWs.getCell(row, 5).value = {
         formula: `IFERROR(COUNTIFS(${dataRange},"<"&${reduitCell})/COUNT(${dataRange})*100,0)`,
@@ -222,78 +233,159 @@ export async function buildWorkbook(
 
   if (comparisonRows.length > 0) {
     const comparatifWs = wb.addWorksheet("Comparatif");
-    const headers = ["PK", "Côté", "Élément", "Largeur existant (m)", "Largeur projet (m)", "Delta (m)", "Statut"];
-    headers.forEach((h, i) => {
-      const cell = comparatifWs.getCell(1, i + 1);
-      cell.value = h;
+    // Two header rows: row 1 groups columns (which pair of states a delta
+    // compares, or "Largeurs" for the three raw widths), row 2 names the
+    // individual column — spelling out "PK/Côté/Élément" once each spanning
+    // both rows so an apprentice reading left to right sees "Existant vs
+    // Projet V0" as one block instead of guessing which delta pairs with
+    // which statut from bare column headers.
+    const fixedCols: [string, number][] = [
+      ["PK", 1],
+      ["Côté", 2],
+      ["Élément", 3],
+    ];
+    fixedCols.forEach(([label, col]) => {
+      comparatifWs.mergeCells(1, col, 2, col);
+      const cell = comparatifWs.getCell(1, col);
+      cell.value = label;
       cell.font = HEADER_FONT;
       cell.fill = HEADER_FILL;
     });
+
+    comparatifWs.mergeCells(1, 4, 1, 6);
+    const largeursHeader = comparatifWs.getCell(1, 4);
+    largeursHeader.value = "Largeurs (m)";
+    largeursHeader.font = HEADER_FONT;
+    largeursHeader.fill = HEADER_FILL;
+    const widthSubHeaders: [number, StateKind][] = [
+      [4, "existant"],
+      [5, "projet"],
+      [6, "projet_v1"],
+    ];
+    widthSubHeaders.forEach(([col, state]) => {
+      const cell = comparatifWs.getCell(2, col);
+      cell.value = STATE_LABELS[state];
+      colorFill(cell, SERIES_COLOR[state]);
+    });
+
+    const pairGroups: [string, number, number][] = [
+      [`${STATE_LABELS.existant} → ${STATE_LABELS.projet}`, 7, 8],
+      [`${STATE_LABELS.projet} → ${STATE_LABELS.projet_v1}`, 9, 10],
+      [`${STATE_LABELS.existant} → ${STATE_LABELS.projet_v1}`, 11, 12],
+    ];
+    pairGroups.forEach(([label, colStart, colEnd]) => {
+      comparatifWs.mergeCells(1, colStart, 1, colEnd);
+      const groupCell = comparatifWs.getCell(1, colStart);
+      groupCell.value = label;
+      groupCell.font = HEADER_FONT;
+      groupCell.fill = HEADER_FILL;
+      const deltaCellHeader = comparatifWs.getCell(2, colStart);
+      deltaCellHeader.value = "Delta (m)";
+      deltaCellHeader.font = HEADER_FONT;
+      deltaCellHeader.fill = HEADER_FILL;
+      const statutCellHeader = comparatifWs.getCell(2, colEnd);
+      statutCellHeader.value = "Statut";
+      statutCellHeader.font = HEADER_FONT;
+      statutCellHeader.fill = HEADER_FILL;
+    });
+
     const sorted = [...comparisonRows].sort((a, b) => (a.side + a.element_type).localeCompare(b.side + b.element_type) || a.pk - b.pk);
+    const statutFormula = (deltaColLetter: string, r: number) =>
+      `IF(${deltaColLetter}${r}="","",IF(${deltaColLetter}${r}>${deltaCell},"Amélioré",IF(${deltaColLetter}${r}<-${deltaCell},"Dégradé","Inchangé")))`;
     sorted.forEach((row, i) => {
-      const r = i + 2;
+      const r = i + 3;
       comparatifWs.getCell(r, 1).value = row.pk;
       comparatifWs.getCell(r, 2).value = SIDE_LABEL[row.side];
       comparatifWs.getCell(r, 3).value = TYPE_LABEL[row.element_type];
       comparatifWs.getCell(r, 4).value = row.width_existant ?? null;
-      comparatifWs.getCell(r, 5).value = row.width_projet ?? null;
-      comparatifWs.getCell(r, 6).value = { formula: `IF(OR(D${r}="",E${r}=""),"",E${r}-D${r})` };
-      comparatifWs.getCell(r, 7).value = {
-        formula: `IF(F${r}="","",IF(F${r}>${deltaCell},"Amélioré",IF(F${r}<-${deltaCell},"Dégradé","Inchangé")))`,
-      };
+      comparatifWs.getCell(r, 5).value = row.width_projet_v0 ?? null;
+      comparatifWs.getCell(r, 6).value = row.width_projet_v1 ?? null;
+      // D=Existant, E=Projet V0, F=Projet V1.
+      comparatifWs.getCell(r, 7).value = { formula: `IF(OR(D${r}="",E${r}=""),"",E${r}-D${r})` };
+      comparatifWs.getCell(r, 8).value = { formula: statutFormula("G", r) };
+      comparatifWs.getCell(r, 9).value = { formula: `IF(OR(E${r}="",F${r}=""),"",F${r}-E${r})` };
+      comparatifWs.getCell(r, 10).value = { formula: statutFormula("I", r) };
+      comparatifWs.getCell(r, 11).value = { formula: `IF(OR(D${r}="",F${r}=""),"",F${r}-D${r})` };
+      comparatifWs.getCell(r, 12).value = { formula: statutFormula("K", r) };
     });
 
-    const lastRow = 1 + sorted.length;
-    if (lastRow >= 2) {
-      comparatifWs.addConditionalFormatting({
-        ref: `G2:G${lastRow}`,
-        rules: [
-          { type: "expression", formulae: ['$G2="Amélioré"'], style: { fill: AMELIORE_FILL }, priority: 1 },
-          { type: "expression", formulae: ['$G2="Dégradé"'], style: { fill: DEGRADE_FILL }, priority: 2 },
-        ],
-      });
+    const lastRow = 2 + sorted.length;
+    if (lastRow >= 3) {
+      for (const statutCol of ["H", "J", "L"]) {
+        comparatifWs.addConditionalFormatting({
+          ref: `${statutCol}3:${statutCol}${lastRow}`,
+          rules: [
+            { type: "expression", formulae: [`$${statutCol}3="Amélioré"`], style: { fill: AMELIORE_FILL }, priority: 1 },
+            { type: "expression", formulae: [`$${statutCol}3="Dégradé"`], style: { fill: DEGRADE_FILL }, priority: 2 },
+          ],
+        });
+      }
     }
 
     // Synthèse par côté + élément — une ligne globale (toutes bandes
     // confondues) ne dit pas si c'est le BAU gauche ou le trottoir droit qui
     // s'est dégradé ; ces COUNTIFS filtrent par Côté (colonne B) et Élément
-    // (colonne C) en plus du Statut (colonne G), comme les autres formules
-    // de ce classeur — live, pas figées.
-    const synthCol = 9;
-    const synthHeaders = ["Côté", "Élément", "Amélioré", "Inchangé", "Dégradé"];
-    // Same colors as the DXF Comparatif layer (ACI_STATUS) for the three
-    // status columns.
-    const synthHeaderColor: Record<number, number> = {
-      2: ACI_STATUS.ameliore,
-      3: ACI_STATUS.inchange,
-      4: ACI_STATUS.degrade,
-    };
-    synthHeaders.forEach((h, i) => {
-      const cell = comparatifWs.getCell(1, synthCol + i);
-      cell.value = h;
-      cell.font = i in synthHeaderColor ? { ...HEADER_FONT, color: { argb: aciToArgb(synthHeaderColor[i]) } } : HEADER_FONT;
+    // (colonne C) en plus du Statut de chaque comparaison, comme les autres
+    // formules de ce classeur — live, pas figées.
+    const synthCol = 14;
+    comparatifWs.mergeCells(1, synthCol, 2, synthCol);
+    comparatifWs.getCell(1, synthCol).value = "Côté";
+    comparatifWs.mergeCells(1, synthCol + 1, 2, synthCol + 1);
+    comparatifWs.getCell(1, synthCol + 1).value = "Élément";
+    [synthCol, synthCol + 1].forEach((c) => {
+      const cell = comparatifWs.getCell(1, c);
+      cell.font = HEADER_FONT;
       cell.fill = HEADER_FILL;
     });
-    const dataRange = Math.max(lastRow, 2);
+
+    const statusKeys: ["ameliore", "inchange", "degrade"] = ["ameliore", "inchange", "degrade"];
+    const statusLabelOf: Record<(typeof statusKeys)[number], "Amélioré" | "Inchangé" | "Dégradé"> = {
+      ameliore: "Amélioré",
+      inchange: "Inchangé",
+      degrade: "Dégradé",
+    };
+    const synthPairGroups: [string, string][] = [
+      [`${STATE_LABELS.existant} → ${STATE_LABELS.projet}`, "H"],
+      [`${STATE_LABELS.projet} → ${STATE_LABELS.projet_v1}`, "J"],
+      [`${STATE_LABELS.existant} → ${STATE_LABELS.projet_v1}`, "L"],
+    ];
     const sideCol = colLetter(2);
     const typeCol = colLetter(3);
-    const statutCol = colLetter(7);
+    let synthStart = synthCol + 2;
+    for (const [label] of synthPairGroups) {
+      comparatifWs.mergeCells(1, synthStart, 1, synthStart + 2);
+      const groupCell = comparatifWs.getCell(1, synthStart);
+      groupCell.value = label;
+      groupCell.font = HEADER_FONT;
+      groupCell.fill = HEADER_FILL;
+      statusKeys.forEach((statusKey, j) => {
+        const cell = comparatifWs.getCell(2, synthStart + j);
+        cell.value = statusLabelOf[statusKey];
+        colorFill(cell, ACI_STATUS[statusKey]);
+      });
+      synthStart += 3;
+    }
+
     const synthKeys = Array.from(
       new Set(sorted.map((r) => `${r.side}|${r.element_type}`)),
     ).map((k) => k.split("|") as [Side, ElementType]);
-    const statusLabels: ["Amélioré", "Inchangé", "Dégradé"] = ["Amélioré", "Inchangé", "Dégradé"];
     synthKeys.forEach(([side, et], i) => {
-      const r = i + 2;
+      const r = i + 3;
       comparatifWs.getCell(r, synthCol).value = SIDE_LABEL[side];
       comparatifWs.getCell(r, synthCol + 1).value = TYPE_LABEL[et];
-      statusLabels.forEach((label, j) => {
-        comparatifWs.getCell(r, synthCol + 2 + j).value = {
-          formula: `COUNTIFS($${sideCol}$2:$${sideCol}$${dataRange},"${SIDE_LABEL[side]}",$${typeCol}$2:$${typeCol}$${dataRange},"${TYPE_LABEL[et]}",$${statutCol}$2:$${statutCol}$${dataRange},"${label}")`,
-        };
-      });
+      let col = synthCol + 2;
+      for (const [, statutColLetter] of synthPairGroups) {
+        statusKeys.forEach((statusKey) => {
+          comparatifWs.getCell(r, col).value = {
+            formula: `COUNTIFS($${sideCol}$3:$${sideCol}$${lastRow},"${SIDE_LABEL[side]}",$${typeCol}$3:$${typeCol}$${lastRow},"${TYPE_LABEL[et]}",$${statutColLetter}$3:$${statutColLetter}$${lastRow},"${statusLabelOf[statusKey]}")`,
+          };
+          col++;
+        });
+      }
     });
 
-    for (let c = 1; c <= synthCol + synthHeaders.length; c++) comparatifWs.getColumn(c).width = 20;
+    for (let c = 1; c <= synthCol + 1 + synthPairGroups.length * 3; c++) comparatifWs.getColumn(c).width = 16;
+    comparatifWs.getColumn(1).width = 10;
   }
 
   if (log.length > 0) {
@@ -301,7 +393,7 @@ export async function buildWorkbook(
     // guess or found missing — the DXF/IFC files disappear once the
     // workbook is filed away, this sheet doesn't.
     const journalWs = wb.addWorksheet("Journal");
-    const headers = ["Fichier", "Information manquante ou déduite"];
+    const headers = ["Fichier concerné", "Ce que l'outil a dû deviner ou n'a pas trouvé"];
     headers.forEach((h, i) => {
       const cell = journalWs.getCell(1, i + 1);
       cell.value = h;

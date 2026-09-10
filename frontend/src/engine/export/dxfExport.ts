@@ -13,7 +13,9 @@
 import { DxfWriter } from "../dxf/dxfWriter";
 import type { Point } from "../geometry";
 import type { ComparisonRow, ComparisonStatus, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
+import { STATE_LABELS } from "../../types/domain";
 import { ACI, ACI_STATUS, SERIES_COLOR } from "./colorScheme";
+import type { LogEntry } from "../log";
 
 const SIDE_TAG: Record<Side, string> = { gauche: "G", droite: "D" };
 const TYPE_TAG: Record<ElementType, string> = {
@@ -25,9 +27,7 @@ const TYPE_TAG: Record<ElementType, string> = {
   voie: "VOIE",
   tpc: "TPC",
 };
-const STATE_TAG: Record<StateKind, string> = { existant: "EXISTANT", projet: "PROJET" };
-const STATE_LABEL: Record<StateKind, string> = { existant: "Existant", projet: "Projet" };
-const SIDE_LABEL: Record<Side, string> = { gauche: "Gauche", droite: "Droite" };
+const STATE_TAG: Record<StateKind, string> = { existant: "EXISTANT", projet: "PROJET_V0", projet_v1: "PROJET_V1" };
 
 const ACI_RATIO_SOUS_REDUIT = ACI.RATIO_SOUS_REDUIT;
 const ACI_RATIO_ENTRE = ACI.RATIO_ENTRE;
@@ -38,6 +38,7 @@ export interface DxfExportOptions {
   includePolylines: boolean;
   includeExistant: boolean;
   includeProjet: boolean;
+  includeProjetV1: boolean;
   includeRatios: boolean;
   includeComparatif: boolean;
 }
@@ -79,12 +80,73 @@ function splitPolylineByGap(points: readonly Point[]): Point[][] {
   return runs;
 }
 
+/** Draws one Comparatif pair (e.g. Existant → Projet V0) as its own colored
+ * plan layer, same technique as Ratios: a centerline point per row, colored
+ * amélioré/inchangé/dégradé. Only rows where this specific pair actually has
+ * a status are used, so a pair with no data (Projet V1 not uploaded) simply
+ * draws nothing rather than an empty/misleading layer. */
+function drawComparatifPair(
+  writer: DxfWriter,
+  rows: ComparisonRow[],
+  statusOf: (r: ComparisonRow) => ComparisonStatus | null | undefined,
+  pairTag: string,
+  options: DxfExportOptions,
+): boolean {
+  const byGroup = new Map<string, ComparisonRow[]>();
+  for (const row of rows) {
+    const status = statusOf(row);
+    if (status == null) continue;
+    if (row.element_type === "non_utilise") continue;
+    const key = `${row.side}|${row.element_type}`;
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key)!.push(row);
+  }
+  if (byGroup.size === 0) return false;
+
+  for (const [key, groupRows] of byGroup.entries()) {
+    const [side, elementType] = key.split("|") as [Side, ElementType];
+    const layer = writer.ensureLayer(`COMPARATIF_${pairTag}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`);
+
+    const planRows = groupRows.filter(
+      (r): r is ComparisonRow & { near_x: number; near_y: number; far_x: number; far_y: number } =>
+        r.near_x != null && r.near_y != null && r.far_x != null && r.far_y != null,
+    );
+    if (planRows.length >= 2) {
+      const ordered = [...planRows].sort((a, b) => a.pk - b.pk);
+      const centerline = ordered.map((r) => ({
+        point: [(r.near_x + r.far_x) / 2, (r.near_y + r.far_y) / 2] as [number, number],
+        color: ACI_STATUS[statusOf(r) as ComparisonStatus],
+      }));
+      if (options.includePoints) {
+        for (const c of centerline) writer.addPoint(layer, c.point[0], c.point[1], c.color);
+      }
+      if (options.includePolylines) {
+        const gaps = centerline.slice(1).map((c, i) => Math.hypot(c.point[0] - centerline[i].point[0], c.point[1] - centerline[i].point[1]));
+        const sortedGaps = [...gaps].sort((a, b) => a - b);
+        const median = sortedGaps[Math.floor(sortedGaps.length / 2)] ?? 0;
+        const gapThreshold = Math.max(median * 8, 1e-6);
+        for (let i = 0; i < centerline.length - 1; i++) {
+          if (gaps[i] > gapThreshold) continue;
+          writer.addPolyline(layer, [centerline[i].point, centerline[i + 1].point], centerline[i].color);
+        }
+      }
+    } else {
+      // Schematic fallback (pk, delta) — no boundary geometry available for
+      // this band (DXF calque/cote mode).
+      const triples = groupRows.map((r) => [r.pk, statusOf(r) as ComparisonStatus] as const);
+      if (options.includePoints) for (const [pk, status] of triples) writer.addPoint(layer, pk, 0, ACI_STATUS[status]);
+    }
+  }
+  return true;
+}
+
 export function buildDxf(
   samples: WidthSample[],
   thresholds: Threshold[],
   comparisonRows: ComparisonRow[] | null,
   options: DxfExportOptions,
   axisPoints?: Point[],
+  log: LogEntry[] = [],
 ): string {
   const writer = new DxfWriter();
 
@@ -93,14 +155,19 @@ export function buildDxf(
     for (const run of splitPolylineByGap(axisPoints)) writer.addPolyline(layer, run, 7);
   }
 
-  if (options.includeExistant || options.includeProjet) {
+  const includeByState: Record<StateKind, boolean> = {
+    existant: options.includeExistant,
+    projet: options.includeProjet,
+    projet_v1: options.includeProjetV1,
+  };
+
+  if (options.includeExistant || options.includeProjet || options.includeProjetV1) {
     const byGroup = new Map<string, WidthSample[]>();
     const meta = new Map<string, [Side, ElementType, StateKind]>();
     for (const s of samples) {
       if (s.width_m == null) continue;
       if (s.element_type === "non_utilise") continue;
-      if (s.state === "existant" && !options.includeExistant) continue;
-      if (s.state === "projet" && !options.includeProjet) continue;
+      if (!includeByState[s.state]) continue;
       const key = `${s.side}|${s.element_type}|${s.state}`;
       if (!byGroup.has(key)) {
         byGroup.set(key, []);
@@ -110,7 +177,7 @@ export function buildDxf(
     }
     for (const [key, groupSamples] of byGroup.entries()) {
       const [side, elementType, state] = meta.get(key)!;
-      const color = SERIES_COLOR[state][side];
+      const color = SERIES_COLOR[state];
       const layer = writer.ensureLayer(`${STATE_TAG[state]}_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`, color);
 
       const planSamples = groupSamples.filter(
@@ -196,89 +263,45 @@ export function buildDxf(
     }
   }
 
+  // A row with a missing state (no Projet V1 uploaded) simply has a null
+  // status for the pairs that involve it — drawComparatifPair skips those
+  // pairs entirely (see its own docstring) rather than draw an empty layer.
+  let hasExistantV0 = false;
+  let hasV0V1 = false;
+  let hasExistantV1 = false;
   if (options.includeComparatif && comparisonRows && comparisonRows.length > 0) {
-    // Drawn at the row's true plan position, colored amélioré/inchangé/
-    // dégradé, exactly like the Ratios layer above — a row's pk always
-    // matches one original sample's own pk (see compareStates), so its
-    // near/far is a real plan position, not a new interpolation.
-    const byGroup = new Map<string, ComparisonRow[]>();
-    for (const row of comparisonRows) {
-      if (row.delta == null || row.status == null) continue;
-      if (row.element_type === "non_utilise") continue;
-      const key = `${row.side}|${row.element_type}`;
-      if (!byGroup.has(key)) byGroup.set(key, []);
-      byGroup.get(key)!.push(row);
-    }
-    for (const [key, groupRows] of byGroup.entries()) {
-      const [side, elementType] = key.split("|") as [Side, ElementType];
-      const layer = writer.ensureLayer(`COMPARATIF_${SIDE_TAG[side]}_${TYPE_TAG[elementType]}`);
-
-      const planRows = groupRows.filter(
-        (r): r is ComparisonRow & { near_x: number; near_y: number; far_x: number; far_y: number; status: ComparisonStatus } =>
-          r.near_x != null && r.near_y != null && r.far_x != null && r.far_y != null && r.status != null,
-      );
-      if (planRows.length >= 2) {
-        const ordered = [...planRows].sort((a, b) => a.pk - b.pk);
-        const centerline = ordered.map((r) => ({
-          point: [(r.near_x + r.far_x) / 2, (r.near_y + r.far_y) / 2] as [number, number],
-          color: ACI_STATUS[r.status],
-        }));
-        if (options.includePoints) {
-          for (const c of centerline) writer.addPoint(layer, c.point[0], c.point[1], c.color);
-        }
-        if (options.includePolylines) {
-          const gaps = centerline.slice(1).map((c, i) => Math.hypot(c.point[0] - centerline[i].point[0], c.point[1] - centerline[i].point[1]));
-          const sortedGaps = [...gaps].sort((a, b) => a - b);
-          const median = sortedGaps[Math.floor(sortedGaps.length / 2)] ?? 0;
-          const gapThreshold = Math.max(median * 8, 1e-6);
-          for (let i = 0; i < centerline.length - 1; i++) {
-            if (gaps[i] > gapThreshold) continue;
-            writer.addPolyline(layer, [centerline[i].point, centerline[i + 1].point], centerline[i].color);
-          }
-        }
-      } else {
-        // Schematic fallback (pk, delta) — no boundary geometry available
-        // for this band (DXF calque/cote mode).
-        const triples = groupRows.map((r) => [r.pk, r.delta as number, ACI_STATUS[r.status as ComparisonStatus]] as const);
-        if (options.includePoints) for (const [pk, delta, color] of triples) writer.addPoint(layer, pk, delta, color);
-        if (options.includePolylines && triples.length >= 2) {
-          const ordered = [...triples].sort((a, b) => a[0] - b[0]);
-          writer.addPolyline(
-            layer,
-            ordered.map(([pk, delta]) => [pk, delta] as [number, number]),
-            7,
-          );
-        }
-      }
-    }
+    hasExistantV0 = drawComparatifPair(writer, comparisonRows, (r) => r.status_existant_v0, "EXISTANT_V0", options);
+    hasV0V1 = drawComparatifPair(writer, comparisonRows, (r) => r.status_v0_v1, "V0_V1", options);
+    hasExistantV1 = drawComparatifPair(writer, comparisonRows, (r) => r.status_existant_v1, "EXISTANT_V1", options);
   }
 
-  // Colors are reused across sections (e.g. ACI 3 is both "Projet Gauche"
-  // and Ratios' "≥ standard"), so a flat color→label map would conflate
-  // them — the legend lists each enabled section's own colors instead,
-  // grouped under that section's name. Placed below the drawing's actual
+  // Colors are reused across sections (e.g. ACI 3 is both "Projet V0" and
+  // Ratios' "≥ standard"), so a flat color→label map would conflate them —
+  // the legend lists each enabled section's own colors instead, grouped
+  // under that section's name. Placed below the drawing's actual
   // bottom-left corner (rounded down to the nearest 50m) rather than a
   // fixed coordinate, so it lands somewhere sensible whatever area a given
   // export happens to cover.
   const legendEntries: [string, number][] = [];
   if (axisPoints && axisPoints.length >= 2) legendEntries.push(["Axe", ACI.AXE]);
-  if (options.includeExistant) {
-    legendEntries.push([`${STATE_LABEL.existant} ${SIDE_LABEL.gauche}`, SERIES_COLOR.existant.gauche]);
-    legendEntries.push([`${STATE_LABEL.existant} ${SIDE_LABEL.droite}`, SERIES_COLOR.existant.droite]);
-  }
-  if (options.includeProjet) {
-    legendEntries.push([`${STATE_LABEL.projet} ${SIDE_LABEL.gauche}`, SERIES_COLOR.projet.gauche]);
-    legendEntries.push([`${STATE_LABEL.projet} ${SIDE_LABEL.droite}`, SERIES_COLOR.projet.droite]);
-  }
+  if (options.includeExistant) legendEntries.push([STATE_LABELS.existant, SERIES_COLOR.existant]);
+  if (options.includeProjet) legendEntries.push([STATE_LABELS.projet, SERIES_COLOR.projet]);
+  if (options.includeProjetV1) legendEntries.push([STATE_LABELS.projet_v1, SERIES_COLOR.projet_v1]);
   if (options.includeRatios) {
     legendEntries.push(["Ratios : < réduit", ACI_RATIO_SOUS_REDUIT]);
     legendEntries.push(["Ratios : réduit ≤ largeur < standard", ACI_RATIO_ENTRE]);
     legendEntries.push(["Ratios : ≥ standard", ACI_RATIO_STANDARD]);
   }
-  if (options.includeComparatif && comparisonRows && comparisonRows.length > 0) {
-    legendEntries.push(["Comparatif : amélioré", ACI_STATUS.ameliore]);
-    legendEntries.push(["Comparatif : inchangé", ACI_STATUS.inchange]);
-    legendEntries.push(["Comparatif : dégradé", ACI_STATUS.degrade]);
+  const comparatifPairs: [boolean, string][] = [
+    [hasExistantV0, `${STATE_LABELS.existant} → ${STATE_LABELS.projet}`],
+    [hasV0V1, `${STATE_LABELS.projet} → ${STATE_LABELS.projet_v1}`],
+    [hasExistantV1, `${STATE_LABELS.existant} → ${STATE_LABELS.projet_v1}`],
+  ];
+  for (const [present, label] of comparatifPairs) {
+    if (!present) continue;
+    legendEntries.push([`Comparatif ${label} : amélioré`, ACI_STATUS.ameliore]);
+    legendEntries.push([`Comparatif ${label} : inchangé`, ACI_STATUS.inchange]);
+    legendEntries.push([`Comparatif ${label} : dégradé`, ACI_STATUS.degrade]);
   }
 
   const bbox = writer.boundingBox();
@@ -291,6 +314,26 @@ export function buildDxf(
     legendEntries.forEach(([label, color], i) => {
       writer.addText(legendLayer, anchorX, anchorY - (i + 1) * lineSpacing, textHeight, label, color);
     });
+
+    // The same "informations manquantes ou déduites" record as the Excel
+    // Journal sheet, but in the DXF itself — placed further down (a visibly
+    // distinct block, its own layer and color) so it never gets confused
+    // with the legend even in a viewer that doesn't show layer names.
+    if (log.length > 0) {
+      const journalLayer = writer.ensureLayer("JOURNAL", ACI.JOURNAL);
+      const journalTop = anchorY - (legendEntries.length + 2) * lineSpacing;
+      writer.addText(journalLayer, anchorX, journalTop, textHeight, "JOURNAL - remarques sur les fichiers importés :", ACI.JOURNAL);
+      log.forEach((entry, i) => {
+        writer.addText(
+          journalLayer,
+          anchorX,
+          journalTop - (i + 1) * lineSpacing,
+          textHeight,
+          `${entry.context} : ${entry.message}`,
+          ACI.JOURNAL,
+        );
+      });
+    }
   }
 
   return writer.toString();

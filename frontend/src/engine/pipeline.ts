@@ -11,6 +11,7 @@ import { extractIfcState } from "./ifc/ifcExtractor";
 import { getIfcApi, openModel } from "./ifc/webIfcClient";
 import type { Point } from "./geometry";
 import type { Band, StateKind, WidthSample } from "../types/domain";
+import { STATE_LABELS } from "../types/domain";
 import { getLog, resetLog, setLogContext, type LogEntry } from "./log";
 
 export type SourceFormat = "dxf" | "ifc";
@@ -33,6 +34,7 @@ export interface ExtractionResult {
   axisConfidence: string;
   existantMode: string;
   projetMode: string;
+  projetV1Mode: string | null;
   bands: Band[];
   samples: WidthSample[];
   /** The shared reference axis, in true plan (x, y) — drawn as its own
@@ -53,9 +55,11 @@ export async function runExtraction(
   gabarit: string,
   dxfStepM: number | null,
   wasmBaseUrl: string,
+  projetV1: FileInput | null = null,
 ): Promise<ExtractionResult> {
   resetLog();
-  const needsIfc = [axesProfils, existant, projet].some((f) => f.format === "ifc");
+  const allFiles = [axesProfils, existant, projet, ...(projetV1 ? [projetV1] : [])];
+  const needsIfc = allFiles.some((f) => f.format === "ifc");
   const api = needsIfc ? await getIfcApi(wasmBaseUrl) : null;
   const openedModelIds: number[] = [];
 
@@ -80,10 +84,15 @@ export async function runExtraction(
     return { bands, samples, mode: "ifc" };
   }
 
-  setLogContext(`Existant (${existant.filename})`);
+  setLogContext(`${STATE_LABELS.existant} (${existant.filename})`);
   const existantResult = extractOne(existant, "existant");
-  setLogContext(`Projet (${projet.filename})`);
+  setLogContext(`${STATE_LABELS.projet} (${projet.filename})`);
   const projetResult = extractOne(projet, "projet");
+  let projetV1Result: { bands: Band[]; samples: WidthSample[]; mode: string } | null = null;
+  if (projetV1) {
+    setLogContext(`${STATE_LABELS.projet_v1} (${projetV1.filename})`);
+    projetV1Result = extractOne(projetV1, "projet_v1");
+  }
 
   for (const id of openedModelIds) {
     try {
@@ -97,8 +106,9 @@ export async function runExtraction(
     axisConfidence: axis.confidence,
     existantMode: existantResult.mode,
     projetMode: projetResult.mode,
-    bands: [...existantResult.bands, ...projetResult.bands],
-    samples: [...existantResult.samples, ...projetResult.samples],
+    projetV1Mode: projetV1Result?.mode ?? null,
+    bands: [...existantResult.bands, ...projetResult.bands, ...(projetV1Result?.bands ?? [])],
+    samples: [...existantResult.samples, ...projetResult.samples, ...(projetV1Result?.samples ?? [])],
     axisPoints: axis.axis.points,
     log: getLog(),
   };

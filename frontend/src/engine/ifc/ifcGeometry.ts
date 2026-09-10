@@ -187,7 +187,7 @@ export function productCentroids(api: IfcAPI, modelID: number, expressIds: Itera
   }
   if (decorativeExcluded > 0) {
     logIssue(
-      `${decorativeExcluded} objet(s) exclu(s) de l'axe : identifié(s) comme symbole décoratif (géométrie petite mais très tessellée) plutôt que marqueur de profil réel.`,
+      `${decorativeExcluded} petit(s) symbole(s) décoratif(s) (icône, pictogramme…) ont été ignorés car ce ne sont pas de vrais repères de profil.`,
     );
   }
   return centroids;
@@ -295,7 +295,7 @@ export function pavementWidthSamples(
   }
   if (clampedCount > 0) {
     logIssue(
-      `Élément ${expressID} : ${clampedCount} sommet(s) situé(s) au-delà de l'étendue de l'axe ignoré(s) (la géométrie déborde le dernier marqueur de profil connu) — mesure tronquée à cette extrémité.`,
+      `Un élément du fichier dépasse le dernier repère de profil connu : ${clampedCount} point(s) au-delà de cette limite ont été ignorés pour ne pas fausser la mesure à cette extrémité.`,
     );
   }
   return result;
@@ -342,7 +342,7 @@ export function resampleAtStations(
   }
   if (missing > 0 && result.length > 0) {
     logIssue(
-      `Bande "${bandLabel ?? "?"}" : ${missing}/${stations.length} station(s) de référence sans géométrie mesurable (profil incomplet à cette PK) — ignorée(s) plutôt qu'estimée(s).`,
+      `Élément "${bandLabel ?? "?"}" : ${missing} PK sur ${stations.length} n'ont pas pu être mesurés (le profil est incomplet à ces endroits) — ils sont simplement absents des résultats plutôt que devinés.`,
     );
   }
   return result.length > 0 ? result : samples;

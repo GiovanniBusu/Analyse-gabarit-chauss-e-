@@ -41,7 +41,7 @@ function defaultBandLabels(nBands: number, gabarit: string): [Side, ElementType]
     return [...left, ...right];
   }
   logIssue(
-    `${nBands} bande(s) détectée(s) entre les lignes géométriques du DXF, ce qui ne correspond à aucun gabarit connu ("${gabarit}" en attend ${expectedNoCenter}${center !== null ? ` ou ${expectedNoCenter + 1}` : ""}) : type d'élément non déterminé pour chaque bande (affectées "Non utilisé"), à corriger manuellement.`,
+    `${nBands} bande(s) trouvée(s) dans le dessin, ce qui ne correspond pas au nombre attendu pour le gabarit "${gabarit}". L'outil n'a pas pu deviner à quoi correspond chaque bande (BAU, accotement, etc.) : elles sont marquées "Non utilisé" — à corriger à la main dans l'onglet "Correction manuelle".`,
   );
   const mid = Math.floor(nBands / 2);
   const labels: [Side, ElementType][] = [];
@@ -151,7 +151,7 @@ function extractHeuristic(
 
     if (widths.length === 0) {
       logIssue(
-        `Bande géométrique #${bandIdx} (${side}) : aucune station n'a pu être mesurée (les deux lignes de bord ne se croisent avec aucun rayon perpendiculaire à l'axe) — bande vide dans les résultats.`,
+        `Une bande côté ${side} n'a donné aucune mesure : ses deux lignes de bord ne coupent jamais correctement l'axe. Elle apparaît vide dans les résultats.`,
       );
     }
 
@@ -208,7 +208,7 @@ function extractLayerBased(
     const confidence = elementType !== "non_utilise" ? 1.0 : 0.2;
     if (elementType === "non_utilise") {
       logIssue(
-        `Calque de cotes "${layerName}" : nom ne contenant aucun mot-clé reconnu (BAU, accotement, trottoir, cycle, voie/chaussée, TPC) — type d'élément non déterminé, affecté "Non utilisé" par défaut.`,
+        `Le calque "${layerName}" ne contient aucun mot-clé reconnu (BAU, accotement, trottoir, piste cyclable, voie/chaussée, TPC) : son type n'a pas pu être deviné, il est marqué "Non utilisé" par défaut — à corriger à la main si besoin.`,
       );
     }
 

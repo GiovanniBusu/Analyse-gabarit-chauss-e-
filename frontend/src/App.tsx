@@ -49,12 +49,20 @@ function App() {
     setExtracting(true);
     setError(null);
     try {
-      const [axesInput, existantInput, projetInput] = await Promise.all([
+      const [axesInput, existantInput, projetInput, projetV1Input] = await Promise.all([
         fileToInput(files.axes_profils),
         fileToInput(files.existant),
         fileToInput(files.projet),
+        files.projet_v1 ? fileToInput(files.projet_v1) : Promise.resolve(null),
       ]);
-      const res = await extractInWorker(axesInput, existantInput, projetInput, gabarit, dxfStepEnabled ? dxfStepM : null);
+      const res = await extractInWorker(
+        axesInput,
+        existantInput,
+        projetInput,
+        gabarit,
+        dxfStepEnabled ? dxfStepM : null,
+        projetV1Input,
+      );
       setBands(res.bands);
       setSamples(res.samples);
       setAxisConfidence(res.axisConfidence);
@@ -107,7 +115,7 @@ function App() {
 
   const handleExportDxf = (options: DxfExportOptions) => {
     try {
-      const content = buildDxf(samples, thresholds, comparisonRows, options, axisPoints);
+      const content = buildDxf(samples, thresholds, comparisonRows, options, axisPoints, extractionLog);
       downloadBlob(new Blob([content], { type: "application/dxf" }), "analyse_gabarit.dxf");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -155,9 +163,8 @@ function App() {
           </label>
           {!dxfStepEnabled && (
             <p className="help">
-              Désactivé : les mesures se font aux sommets déjà présents dans les lignes du DXF, sans pas fixe (mode
-              hérité uniquement — sans effet en IFC ou en DXF par calques, qui suivent déjà la densité du fichier
-              source).
+              Désactivé : les mesures se font aux points déjà présents dans le dessin, sans intervalle régulier.
+              (Concerne seulement l'ancien mode DXF par lignes ; sans effet pour l'IFC ou le DXF par calques.)
             </p>
           )}
           <button disabled={!allThreeUploaded || extracting} onClick={handleExtract}>
@@ -167,17 +174,23 @@ function App() {
         {axisConfidence && (
           <p className="help">
             Référence PK : <strong>{axisConfidence}</strong>{" "}
-            {axisConfidence === "relative" && "(pas de PK réel trouvé — station relative depuis l'origine)"}
+            {axisConfidence === "relative" &&
+              "(le fichier ne contient pas de vrais PK : les valeurs affichées comptent juste la distance depuis le début de la route)"}
             {axisConfidence === "profile_markers" &&
-              "(axe reconstruit à partir des marqueurs de profil du fichier — aucune valeur de PK réelle n'y est stockée, donc la station reste relative depuis l'origine)"}
+              "(l'axe a été retrouvé à partir des repères de profils du fichier — ce ne sont pas forcément les vrais PK du projet)"}
           </p>
         )}
         {extractionLog.length > 0 && (
           <details className="extraction-log">
             <summary>
-              Journal d'extraction — {extractionLog.length} information{extractionLog.length > 1 ? "s" : ""} manquante
-              {extractionLog.length > 1 ? "s" : ""} ou déduite{extractionLog.length > 1 ? "s" : ""} dans les fichiers
+              {extractionLog.length} remarque{extractionLog.length > 1 ? "s" : ""} sur les fichiers importés — à lire
+              avant de valider les résultats
             </summary>
+            <p className="extraction-log-intro">
+              Ces remarques signalent ce que l'outil n'a pas trouvé tel quel dans vos fichiers et a dû deviner ou
+              ignorer. Elles ne bloquent pas les résultats, mais valent la peine d'être vérifiées — surtout si vous
+              débutez avec ce logiciel.
+            </p>
             <ul>
               {extractionLog.map((entry, i) => (
                 <li key={i}>

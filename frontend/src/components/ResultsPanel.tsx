@@ -1,5 +1,5 @@
 import type { RatioResult } from "../types/domain";
-import { ELEMENT_TYPE_LABELS } from "../types/domain";
+import { ELEMENT_TYPE_LABELS, STATE_LABELS } from "../types/domain";
 
 interface Props {
   ratios: RatioResult[];
@@ -27,7 +27,7 @@ export default function ResultsPanel({ ratios }: Props) {
           <tr key={i}>
             <td>{r.side === "gauche" ? "Gauche" : "Droite"}</td>
             <td>{ELEMENT_TYPE_LABELS[r.element_type]}</td>
-            <td>{r.state === "existant" ? "Existant" : "Projet"}</td>
+            <td>{STATE_LABELS[r.state]}</td>
             <td>{r.n_samples}</td>
             <td className="pct-bad">{r.pct_sous_reduit.toFixed(1)}%</td>
             <td className="pct-mid">{r.pct_entre.toFixed(1)}%</td>
