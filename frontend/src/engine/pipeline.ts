@@ -45,7 +45,7 @@ export async function runExtraction(
   existant: FileInput,
   projet: FileInput,
   gabarit: string,
-  dxfStepM: number,
+  dxfStepM: number | null,
   wasmBaseUrl: string,
 ): Promise<ExtractionResult> {
   const needsIfc = [axesProfils, existant, projet].some((f) => f.format === "ifc");

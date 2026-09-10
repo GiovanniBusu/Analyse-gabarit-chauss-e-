@@ -61,7 +61,7 @@ export function extractDxfState(
   state: StateKind,
   axis: AxisReference,
   gabarit = "route",
-  stepM = 5.0,
+  stepM: number | null = 5.0,
 ): { bands: Band[]; samples: WidthSample[]; mode: "layers" | "heuristic" } {
   const doc = parseDxf(content);
   const mode = namedAxisAndCoteLayers(doc) !== null ? "layers" : "heuristic";
@@ -74,12 +74,30 @@ export function extractDxfState(
   return { bands, samples, mode };
 }
 
+/** Stations taken from the two boundary lines' own vertices instead of a
+ * fixed step — used when the user turns sampling off, so the measurement
+ * lands exactly on the polylines' own points rather than an arbitrary
+ * resampling of them. Both lines' vertices are pooled and projected onto the
+ * axis since either one may carry the finer detail at a given stretch (a
+ * curve refined on one edge but not the other, for instance); near-duplicate
+ * stations (both lines happening to have a vertex at nearly the same PK)
+ * collapse into one sample rather than two almost-identical ones. */
+function nativeStations(axis: AxisReference, lineA: PolylineIndex, lineB: PolylineIndex): number[] {
+  const raw = [...lineA.points, ...lineB.points].map((p) => axis.axis.projectPoint(p)[0]);
+  raw.sort((a, b) => a - b);
+  const merged: number[] = [];
+  for (const s of raw) {
+    if (merged.length === 0 || s - merged[merged.length - 1] > 0.01) merged.push(s);
+  }
+  return merged;
+}
+
 function extractHeuristic(
   doc: ReturnType<typeof parseDxf>,
   state: StateKind,
   axis: AxisReference,
   gabarit: string,
-  stepM: number,
+  stepM: number | null,
 ): { bands: Band[]; samples: WidthSample[] } {
   const lines = findLegacyPolylines(doc);
   if (lines.length < 2) {
@@ -91,7 +109,7 @@ function extractHeuristic(
   const orderedLines = order.map((i) => new PolylineIndex(lines[i]));
   const nBands = orderedLines.length - 1;
   const defaultLabels = defaultBandLabels(nBands, gabarit);
-  const stations = frange(0, axis.axis.length, stepM);
+  const fixedStations = stepM !== null ? frange(0, axis.axis.length, stepM) : null;
 
   const bands: Band[] = [];
   const samples: WidthSample[] = [];
@@ -100,6 +118,7 @@ function extractHeuristic(
     const [side, elementType] = defaultLabels[bandIdx];
     const source: SourceMethod = "recuperation_dxf";
     const confidence = 0.4;
+    const stations = fixedStations ?? nativeStations(axis, orderedLines[bandIdx], orderedLines[bandIdx + 1]);
 
     const widths: number[] = [];
     for (const s of stations) {

@@ -20,6 +20,7 @@ type Tab = "mapping" | "results" | "comparison" | "thresholds" | "export";
 function App() {
   const [files, setFiles] = useState<Partial<Record<UploadRole, File>>>({});
   const [gabarit, setGabarit] = useState("route");
+  const [dxfStepEnabled, setDxfStepEnabled] = useState(true);
   const [dxfStepM, setDxfStepM] = useState(5.0);
   const [bands, setBands] = useState<Band[]>([]);
   const [samples, setSamples] = useState<WidthSample[]>([]);
@@ -51,7 +52,7 @@ function App() {
         fileToInput(files.existant),
         fileToInput(files.projet),
       ]);
-      const res = await extractInWorker(axesInput, existantInput, projetInput, gabarit, dxfStepM);
+      const res = await extractInWorker(axesInput, existantInput, projetInput, gabarit, dxfStepEnabled ? dxfStepM : null);
       setBands(res.bands);
       setSamples(res.samples);
       setAxisConfidence(res.axisConfidence);
@@ -134,6 +135,10 @@ function App() {
               <option value="autoroute">Autoroute (Accotement/BAU/Voie/Voie/TPC)</option>
             </select>
           </label>
+          <label className="checkbox-inline">
+            <input type="checkbox" checked={dxfStepEnabled} onChange={(e) => setDxfStepEnabled(e.target.checked)} />
+            Échantillonnage à pas fixe (DXF)
+          </label>
           <label>
             Pas d'échantillonnage DXF (m) :
             <input
@@ -141,9 +146,17 @@ function App() {
               value={dxfStepM}
               min={1}
               step={1}
+              disabled={!dxfStepEnabled}
               onChange={(e) => setDxfStepM(parseFloat(e.target.value))}
             />
           </label>
+          {!dxfStepEnabled && (
+            <p className="help">
+              Désactivé : les mesures se font aux sommets déjà présents dans les lignes du DXF, sans pas fixe (mode
+              hérité uniquement — sans effet en IFC ou en DXF par calques, qui suivent déjà la densité du fichier
+              source).
+            </p>
+          )}
           <button disabled={!allThreeUploaded || extracting} onClick={handleExtract}>
             {extracting ? "Extraction en cours…" : "Lancer l'extraction"}
           </button>
