@@ -5,6 +5,7 @@
 
 import ExcelJS from "exceljs";
 import type { ComparisonRow, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
+import { ACI, ACI_STATUS, SERIES_COLOR, aciToArgb } from "./colorScheme";
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
 const INPUT_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
@@ -98,7 +99,9 @@ export async function buildWorkbook(
       const [side, et, state] = groupMeta.get(key)!;
       const cell = donneesWs.getCell(1, col);
       cell.value = groupKeyLabel(side, et, state);
-      cell.font = HEADER_FONT;
+      // Same color as this band's DXF layer (SERIES_COLOR), so the two
+      // exports read as one system instead of two independent palettes.
+      cell.font = { ...HEADER_FONT, color: { argb: aciToArgb(SERIES_COLOR[state][side]) } };
       cell.fill = HEADER_FILL;
       donneesWs.getColumn(col).width = 22;
     });
@@ -175,10 +178,17 @@ export async function buildWorkbook(
   const resultatsWs = wb.addWorksheet("Résultats");
   {
     const headers = ["Côté", "Élément", "État", "N", "< Réduit %", "≥ Réduit < Standard %", "≥ Standard %"];
+    // The last three headers are literally the Ratios classification (see
+    // dxfExport.ts's classify()) — same colors as that DXF layer.
+    const headerColor: Record<number, number> = {
+      4: ACI.RATIO_SOUS_REDUIT,
+      5: ACI.RATIO_ENTRE,
+      6: ACI.RATIO_STANDARD,
+    };
     headers.forEach((h, i) => {
       const cell = resultatsWs.getCell(1, i + 1);
       cell.value = h;
-      cell.font = HEADER_FONT;
+      cell.font = i in headerColor ? { ...HEADER_FONT, color: { argb: aciToArgb(headerColor[i]) } } : HEADER_FONT;
       cell.fill = HEADER_FILL;
     });
     let row = 2;
@@ -249,10 +259,17 @@ export async function buildWorkbook(
     // de ce classeur — live, pas figées.
     const synthCol = 9;
     const synthHeaders = ["Côté", "Élément", "Amélioré", "Inchangé", "Dégradé"];
+    // Same colors as the DXF Comparatif layer (ACI_STATUS) for the three
+    // status columns.
+    const synthHeaderColor: Record<number, number> = {
+      2: ACI_STATUS.ameliore,
+      3: ACI_STATUS.inchange,
+      4: ACI_STATUS.degrade,
+    };
     synthHeaders.forEach((h, i) => {
       const cell = comparatifWs.getCell(1, synthCol + i);
       cell.value = h;
-      cell.font = HEADER_FONT;
+      cell.font = i in synthHeaderColor ? { ...HEADER_FONT, color: { argb: aciToArgb(synthHeaderColor[i]) } } : HEADER_FONT;
       cell.fill = HEADER_FILL;
     });
     const dataRange = Math.max(lastRow, 2);

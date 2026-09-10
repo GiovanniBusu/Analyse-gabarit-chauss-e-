@@ -4,6 +4,19 @@
  * full control, no dependency behavior to second-guess, and it's a small,
  * well-documented text format. */
 
+/** DXF R12 text values predate UTF-8 (readers expect ASCII/ANSI), so
+ * writing an accented or non-ASCII character straight through comes back
+ * as mojibake in most viewers (confirmed: "réduit" round-tripped through
+ * ezdxf as "rÃ©duit"). Transliterating to plain ASCII sidesteps needing
+ * either party to agree on an encoding or escape convention. */
+function toDxfAscii(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // combining diacritical marks left behind by NFD (é -> e + ´ -> e)
+    .replace(/≤/g, "<=")
+    .replace(/≥/g, ">=");
+}
+
 interface LayerDef {
   name: string;
   color: number;
@@ -22,10 +35,20 @@ interface PolylineEntity {
   color?: number;
 }
 
+interface TextEntity {
+  layer: string;
+  x: number;
+  y: number;
+  height: number;
+  text: string;
+  color?: number;
+}
+
 export class DxfWriter {
   private layers = new Map<string, LayerDef>();
   private points: PointEntity[] = [];
   private polylines: PolylineEntity[] = [];
+  private texts: TextEntity[] = [];
 
   ensureLayer(name: string, color = 7): string {
     const safe = name.replace(/[^A-Za-z0-9_-]+/g, "_");
@@ -46,8 +69,42 @@ export class DxfWriter {
     this.polylines.push({ layer, points, color });
   }
 
+  addText(layer: string, x: number, y: number, height: number, text: string, color?: number): void {
+    this.texts.push({ layer, x, y, height, text: toDxfAscii(text), color });
+  }
+
   get layerNames(): string[] {
     return Array.from(this.layers.keys());
+  }
+
+  /** Extent of every point/polyline vertex written so far — used to anchor
+   * the legend below the drawing's own bottom-left corner rather than a
+   * fixed, arbitrary coordinate that wouldn't line up with the actual
+   * geometry (every export can cover a different area). Text isn't
+   * included: the legend's own placement depends on this box, so folding
+   * it in would make the anchor shift depending on whether a legend was
+   * already added. */
+  boundingBox(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of this.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    for (const pl of this.polylines) {
+      for (const [x, y] of pl.points) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (!Number.isFinite(minX)) return null;
+    return { minX, minY, maxX, maxY };
   }
 
   toString(): string {
@@ -105,6 +162,16 @@ export class DxfWriter {
         emit(30, 0.0);
       }
       emit(0, "SEQEND");
+    }
+    for (const t of this.texts) {
+      emit(0, "TEXT");
+      emit(8, t.layer);
+      if (t.color !== undefined) emit(62, t.color);
+      emit(10, t.x);
+      emit(20, t.y);
+      emit(30, 0.0);
+      emit(40, t.height);
+      emit(1, t.text);
     }
     emit(0, "ENDSEC");
     emit(0, "EOF");
