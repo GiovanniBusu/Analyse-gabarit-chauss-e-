@@ -2,7 +2,7 @@
 
 import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
-import { perpendicularDirection, type Point } from "../geometry";
+import { PolylineIndex, perpendicularDirection, type Point } from "../geometry";
 import { shapeVertexGroups, shapeVertices } from "./webIfcClient";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
 import type { Side } from "../../types/domain";
@@ -279,4 +279,37 @@ export function pavementWidthSamples(
     }
   }
   return result;
+}
+
+/** Resamples a band's near/far boundary curve — already reconstructed at
+ * whatever density its own mesh naturally produced — at a fixed, shared set
+ * of stations instead: the axis's own reference points (e.g. the file's
+ * real profile markers, when the axis was built from IfcReferent). Every
+ * band then reports a width at exactly the same stations, the way a
+ * hand-measured survey would (one value per profile, not one per however
+ * many mesh vertices happened to land nearby) — and matches what DXF
+ * heuristic mode already does by ray-casting against boundary polylines, so
+ * IFC extraction no longer disagrees with it on what "one measurement"
+ * means. A station beyond where this particular band actually has geometry
+ * simply fails to intersect the reconstructed curve and is skipped, same as
+ * an incomplete profile is skipped elsewhere in this engine — never
+ * estimated. */
+export function resampleAtStations(samples: PlanWidthSample[], axis: AxisReference, stations: number[]): PlanWidthSample[] {
+  if (samples.length < 2) return samples;
+  const ordered = [...samples].sort((a, b) => a.pk - b.pk);
+  const side = ordered[0].side;
+  const nearLine = new PolylineIndex(ordered.map((s) => s.near));
+  const farLine = new PolylineIndex(ordered.map((s) => s.far));
+
+  const result: PlanWidthSample[] = [];
+  for (const station of stations) {
+    const { point, direction } = axis.axis.pointAndDirectionAtStation(station);
+    const perp = perpendicularDirection(direction);
+    const near = nearLine.intersectRay(point, perp);
+    const far = farLine.intersectRay(point, perp);
+    if (!near || !far) continue;
+    const width = Math.hypot(far[0] - near[0], far[1] - near[1]);
+    result.push({ pk: axis.stationToPk(station), width, side, near, far });
+  }
+  return result.length > 0 ? result : samples;
 }

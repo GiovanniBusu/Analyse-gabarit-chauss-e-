@@ -5,7 +5,7 @@ import type { IfcAPI } from "web-ifc";
 import type { AxisReference } from "../axisReference";
 import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } from "../../types/domain";
 import { attrRef, attrRefList, attrString } from "./webIfcClient";
-import { pavementWidthSamples, type PlanWidthSample } from "./ifcGeometry";
+import { pavementWidthSamples, resampleAtStations, type PlanWidthSample } from "./ifcGeometry";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
 
 const KEYWORD_HINTS: [RegExp, ElementType][] = [
@@ -135,7 +135,13 @@ export function extractIfcState(
       bySide.get(s.side)!.push(s);
     }
 
-    for (const [autoSide, sideSamples] of bySide.entries()) {
+    for (const [autoSide, rawSideSamples] of bySide.entries()) {
+      // Every band measured at the same shared stations — the axis's own
+      // reference points — instead of each band's own natural mesh-vertex
+      // density, so widths are directly comparable across bands and N no
+      // longer depends on how finely one particular product happened to be
+      // triangulated (see resampleAtStations' docstring).
+      const sideSamples = resampleAtStations(rawSideSamples, axis, axis.axis.cumLength);
       const bandId = `ifc-${state}-${slugify(group.typeName)}-${autoSide}`;
       let side: Side = autoSide;
       let elementType: ElementType;
