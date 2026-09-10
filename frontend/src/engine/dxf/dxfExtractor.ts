@@ -6,6 +6,7 @@ import type { Band, ElementType, Side, SourceMethod, StateKind, WidthSample } fr
 import { parseDxf } from "./dxfReader";
 import { findLegacyPolylines, namedAxisAndCoteLayers, numericValue } from "./dxfCommon";
 import { maxOf, minOf } from "../arrayUtils";
+import { logIssue } from "../log";
 
 const ROUTE_TEMPLATE_HALF: ElementType[] = ["accotement", "trottoir", "cycle", "voie"];
 const AUTOROUTE_TEMPLATE_HALF: ElementType[] = ["accotement", "bau", "voie", "voie"];
@@ -39,6 +40,9 @@ function defaultBandLabels(nBands: number, gabarit: string): [Side, ElementType]
     const right: [Side, ElementType][] = [...half].reverse().map((t) => ["droite", t]);
     return [...left, ...right];
   }
+  logIssue(
+    `${nBands} bande(s) détectée(s) entre les lignes géométriques du DXF, ce qui ne correspond à aucun gabarit connu ("${gabarit}" en attend ${expectedNoCenter}${center !== null ? ` ou ${expectedNoCenter + 1}` : ""}) : type d'élément non déterminé pour chaque bande (affectées "Non utilisé"), à corriger manuellement.`,
+  );
   const mid = Math.floor(nBands / 2);
   const labels: [Side, ElementType][] = [];
   for (let i = 0; i < mid; i++) labels.push(["gauche", "non_utilise"]);
@@ -145,6 +149,12 @@ function extractHeuristic(
       });
     }
 
+    if (widths.length === 0) {
+      logIssue(
+        `Bande géométrique #${bandIdx} (${side}) : aucune station n'a pu être mesurée (les deux lignes de bord ne se croisent avec aucun rayon perpendiculaire à l'axe) — bande vide dans les résultats.`,
+      );
+    }
+
     bands.push({
       band_id: bandKey,
       state,
@@ -196,6 +206,11 @@ function extractLayerBased(
     const bandKey = `dxf-${state}-${layerName}`;
     const source: SourceMethod = "recuperation_entrees";
     const confidence = elementType !== "non_utilise" ? 1.0 : 0.2;
+    if (elementType === "non_utilise") {
+      logIssue(
+        `Calque de cotes "${layerName}" : nom ne contenant aucun mot-clé reconnu (BAU, accotement, trottoir, cycle, voie/chaussée, TPC) — type d'élément non déterminé, affecté "Non utilisé" par défaut.`,
+      );
+    }
 
     const widths: number[] = [];
     for (const t of layerTexts) {

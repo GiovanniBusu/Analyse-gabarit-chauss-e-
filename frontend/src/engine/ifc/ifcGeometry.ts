@@ -6,6 +6,7 @@ import { PolylineIndex, perpendicularDirection, type Point } from "../geometry";
 import { shapeVertexGroups, shapeVertices } from "./webIfcClient";
 import { maxOf, minOf, pushAll } from "../arrayUtils";
 import type { Side } from "../../types/domain";
+import { logIssue } from "../log";
 
 export interface RingWidth {
   station: number;
@@ -163,21 +164,31 @@ function isDecorativeSymbol(verts: [number, number, number][]): boolean {
 export function productCentroids(api: IfcAPI, modelID: number, expressIds: Iterable<number>, maxProducts = 2000): [number, number, number][] {
   const centroids: [number, number, number][] = [];
   let count = 0;
+  let decorativeExcluded = 0;
   for (const id of expressIds) {
     const verts = shapeVertices(api, modelID, id);
-    if (verts && verts.length > 0 && !isDecorativeSymbol(verts)) {
-      let sx = 0;
-      let sy = 0;
-      let sz = 0;
-      for (const v of verts) {
-        sx += v[0];
-        sy += v[1];
-        sz += v[2];
+    if (verts && verts.length > 0) {
+      if (isDecorativeSymbol(verts)) {
+        decorativeExcluded++;
+      } else {
+        let sx = 0;
+        let sy = 0;
+        let sz = 0;
+        for (const v of verts) {
+          sx += v[0];
+          sy += v[1];
+          sz += v[2];
+        }
+        centroids.push([sx / verts.length, sy / verts.length, sz / verts.length]);
       }
-      centroids.push([sx / verts.length, sy / verts.length, sz / verts.length]);
     }
     count++;
     if (count >= maxProducts) break;
+  }
+  if (decorativeExcluded > 0) {
+    logIssue(
+      `${decorativeExcluded} objet(s) exclu(s) de l'axe : identifié(s) comme symbole décoratif (géométrie petite mais très tessellée) plutôt que marqueur de profil réel.`,
+    );
   }
   return centroids;
 }
@@ -253,6 +264,7 @@ export function pavementWidthSamples(
   if (!vertexGroups) return [];
 
   const result: PlanWidthSample[] = [];
+  let clampedCount = 0;
   for (const verts of vertexGroups) {
     if (verts.length < 2) continue;
     const stations: number[] = [];
@@ -265,7 +277,10 @@ export function pavementWidthSamples(
       // up unrelated real points there and reading their offset spread as
       // one implausibly wide ring (see projectPoint's docstring). Skip it
       // rather than let it corrupt the first/last ring on this band.
-      if (clamped) continue;
+      if (clamped) {
+        clampedCount++;
+        continue;
+      }
       stations.push(s);
       offsets.push(o);
     }
@@ -277,6 +292,11 @@ export function pavementWidthSamples(
       const far: Point = [point[0] + offsetMax * perp[0], point[1] + offsetMax * perp[1]];
       result.push({ pk: axis.stationToPk(station), width, side, near, far });
     }
+  }
+  if (clampedCount > 0) {
+    logIssue(
+      `Élément ${expressID} : ${clampedCount} sommet(s) situé(s) au-delà de l'étendue de l'axe ignoré(s) (la géométrie déborde le dernier marqueur de profil connu) — mesure tronquée à cette extrémité.`,
+    );
   }
   return result;
 }
@@ -294,7 +314,12 @@ export function pavementWidthSamples(
  * simply fails to intersect the reconstructed curve and is skipped, same as
  * an incomplete profile is skipped elsewhere in this engine — never
  * estimated. */
-export function resampleAtStations(samples: PlanWidthSample[], axis: AxisReference, stations: number[]): PlanWidthSample[] {
+export function resampleAtStations(
+  samples: PlanWidthSample[],
+  axis: AxisReference,
+  stations: number[],
+  bandLabel?: string,
+): PlanWidthSample[] {
   if (samples.length < 2) return samples;
   const ordered = [...samples].sort((a, b) => a.pk - b.pk);
   const side = ordered[0].side;
@@ -302,14 +327,23 @@ export function resampleAtStations(samples: PlanWidthSample[], axis: AxisReferen
   const farLine = new PolylineIndex(ordered.map((s) => s.far));
 
   const result: PlanWidthSample[] = [];
+  let missing = 0;
   for (const station of stations) {
     const { point, direction } = axis.axis.pointAndDirectionAtStation(station);
     const perp = perpendicularDirection(direction);
     const near = nearLine.intersectRay(point, perp);
     const far = farLine.intersectRay(point, perp);
-    if (!near || !far) continue;
+    if (!near || !far) {
+      missing++;
+      continue;
+    }
     const width = Math.hypot(far[0] - near[0], far[1] - near[1]);
     result.push({ pk: axis.stationToPk(station), width, side, near, far });
+  }
+  if (missing > 0 && result.length > 0) {
+    logIssue(
+      `Bande "${bandLabel ?? "?"}" : ${missing}/${stations.length} station(s) de référence sans géométrie mesurable (profil incomplet à cette PK) — ignorée(s) plutôt qu'estimée(s).`,
+    );
   }
   return result.length > 0 ? result : samples;
 }
