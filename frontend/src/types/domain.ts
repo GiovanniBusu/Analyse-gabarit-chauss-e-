@@ -8,7 +8,11 @@ export type ElementType =
   | "tpc";
 
 export type Side = "gauche" | "droite";
-export type StateKind = "existant" | "projet";
+// "projet" is kept as the internal key for the first project version (V0) so
+// existing extraction/mapping code that already keys off "existant"/"projet"
+// doesn't need to change — only its *display* label became "Projet V0" once
+// a second project version (V1) was added for a 3-way comparison.
+export type StateKind = "existant" | "projet" | "projet_v1";
 export type SourceMethod =
   | "entree_manuelle"
   | "menu_deroulant"
@@ -38,6 +42,12 @@ export const SOURCE_COLORS: Record<SourceMethod, string> = {
   menu_deroulant: "#4fc3f7",
   recuperation_entrees: "#81c784",
   recuperation_dxf: "#e0e0e0",
+};
+
+export const STATE_LABELS: Record<StateKind, string> = {
+  existant: "Existant",
+  projet: "Projet V0",
+  projet_v1: "Projet V1",
 };
 
 export interface Band {
@@ -106,9 +116,17 @@ export interface ComparisonRow {
   side: Side;
   element_type: ElementType;
   width_existant?: number | null;
-  width_projet?: number | null;
-  delta?: number | null;
-  status?: ComparisonStatus | null;
+  width_projet_v0?: number | null;
+  // Only populated when a "Projet V1" file was uploaded — the 3-way
+  // comparison is optional, so every V1-related field here is simply absent
+  // otherwise (see compareStates).
+  width_projet_v1?: number | null;
+  delta_existant_v0?: number | null;
+  status_existant_v0?: ComparisonStatus | null;
+  delta_v0_v1?: number | null;
+  status_v0_v1?: ComparisonStatus | null;
+  delta_existant_v1?: number | null;
+  status_existant_v1?: ComparisonStatus | null;
   // Plan-view (true x, y) boundary points at this row's PK, for drawing the
   // Comparatif DXF layer "en situation" like Ratios/Existant/Projet — every
   // row's pk exactly matches an original WidthSample's own pk (see
@@ -120,4 +138,4 @@ export interface ComparisonRow {
   far_y?: number | null;
 }
 
-export type UploadRole = "axes_profils" | "existant" | "projet";
+export type UploadRole = "axes_profils" | "existant" | "projet" | "projet_v1";

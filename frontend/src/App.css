@@ -83,6 +83,11 @@ header h1 {
   color: #8d6e00;
 }
 
+.extraction-log-intro {
+  margin: 8px 0;
+  color: #5f4300;
+}
+
 .extraction-log ul {
   margin: 8px 0 0;
   padding-left: 20px;

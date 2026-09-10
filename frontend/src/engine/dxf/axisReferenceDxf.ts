@@ -61,7 +61,7 @@ export function buildAxisReferenceFromDxfContent(content: string, pkStepHint?: n
   }
   if (bestCluster) {
     logIssue(
-      "Aucune étiquette de PK explicite (valeur > 100) trouvée dans le DXF : axe calé sur une numérotation séquentielle de profils (1, 2, 3, …) avec un pas estimé — vérifier que le pas déduit correspond bien au pas réel des profils.",
+      "Le fichier ne contient pas de PK écrits en toutes lettres : l'outil s'est basé sur la numérotation des profils (1, 2, 3…) et a deviné l'espacement entre eux. À vérifier : cet espacement doit correspondre à la réalité du projet.",
     );
     const ordered = [...bestCluster].sort((a, b) => parseInt(a.content, 10) - parseInt(b.content, 10));
     const stations = ordered.map((t) => axis.projectPoint([t.x, t.y])[0]);
@@ -79,7 +79,7 @@ export function buildAxisReferenceFromDxfContent(content: string, pkStepHint?: n
 
   // 3) fallback: relative station, origin at axis start
   logIssue(
-    "Aucune étiquette de PK ni numérotation de profils exploitable trouvée dans le DXF : la station reste relative depuis l'origine de l'axe (pas de PK réel).",
+    "Aucun PK ni numéro de profil n'a été trouvé dans le fichier : les PK affichés sont juste une distance comptée depuis le début de l'axe, pas les vrais PK du projet.",
   );
   return new AxisReference(axis, 1.0, 0.0, "relative");
 }

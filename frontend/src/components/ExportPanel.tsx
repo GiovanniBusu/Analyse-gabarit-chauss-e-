@@ -12,6 +12,7 @@ export default function ExportPanel({ onExportExcel, onExportDxf }: Props) {
     includePolylines: true,
     includeExistant: true,
     includeProjet: true,
+    includeProjetV1: true,
     includeRatios: false,
     includeComparatif: false,
   });
@@ -41,7 +42,11 @@ export default function ExportPanel({ onExportExcel, onExportDxf }: Props) {
           </label>
           <label>
             <input type="checkbox" checked={options.includeProjet} onChange={() => toggle("includeProjet")} />
-            Calque Projet
+            Calque Projet V0
+          </label>
+          <label>
+            <input type="checkbox" checked={options.includeProjetV1} onChange={() => toggle("includeProjetV1")} />
+            Calque Projet V1
           </label>
           <label>
             <input type="checkbox" checked={options.includeRatios} onChange={() => toggle("includeRatios")} />

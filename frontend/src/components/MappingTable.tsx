@@ -1,5 +1,5 @@
 import type { Band, ElementType, Side } from "../types/domain";
-import { ELEMENT_TYPE_LABELS, SOURCE_COLORS, SOURCE_LABELS } from "../types/domain";
+import { ELEMENT_TYPE_LABELS, SOURCE_COLORS, SOURCE_LABELS, STATE_LABELS } from "../types/domain";
 
 const ELEMENT_OPTIONS: ElementType[] = ["non_utilise", "accotement", "trottoir", "bau", "cycle", "voie", "tpc"];
 const SIDE_OPTIONS: Side[] = ["gauche", "droite"];
@@ -30,7 +30,7 @@ export default function MappingTable({ bands, onOverride }: Props) {
       <tbody>
         {bands.map((band) => (
           <tr key={band.band_id}>
-            <td>{band.state === "existant" ? "Existant" : "Projet"}</td>
+            <td>{STATE_LABELS[band.state]}</td>
             <td className="label-hint">{band.label_hint ?? band.band_id}</td>
             <td>
               <select

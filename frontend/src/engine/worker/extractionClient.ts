@@ -34,17 +34,18 @@ export function extractInWorker(
   projet: FileInput,
   gabarit: string,
   dxfStepM: number | null,
+  projetV1: FileInput | null = null,
 ): Promise<ExtractionResult> {
   const w = getWorker();
   const requestId = ++counter;
   const wasmBaseUrl = new URL("wasm/", document.baseURI).href;
   const transfer: Transferable[] = [];
-  for (const f of [axesProfils, existant, projet]) {
+  for (const f of [axesProfils, existant, projet, ...(projetV1 ? [projetV1] : [])]) {
     if (f.bytes) transfer.push(f.bytes.buffer);
   }
   return new Promise((resolve, reject) => {
     pending.set(requestId, { resolve, reject });
-    w.postMessage({ requestId, axesProfils, existant, projet, gabarit, dxfStepM, wasmBaseUrl }, transfer);
+    w.postMessage({ requestId, axesProfils, existant, projet, projetV1, gabarit, dxfStepM, wasmBaseUrl }, transfer);
   });
 }
 
