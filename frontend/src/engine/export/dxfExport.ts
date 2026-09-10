@@ -13,6 +13,7 @@
 import { DxfWriter } from "../dxf/dxfWriter";
 import type { Point } from "../geometry";
 import type { ComparisonRow, ComparisonStatus, ElementType, Side, StateKind, Threshold, WidthSample } from "../../types/domain";
+import { ACI, ACI_STATUS, SERIES_COLOR } from "./colorScheme";
 
 const SIDE_TAG: Record<Side, string> = { gauche: "G", droite: "D" };
 const TYPE_TAG: Record<ElementType, string> = {
@@ -25,19 +26,12 @@ const TYPE_TAG: Record<ElementType, string> = {
   tpc: "TPC",
 };
 const STATE_TAG: Record<StateKind, string> = { existant: "EXISTANT", projet: "PROJET" };
+const STATE_LABEL: Record<StateKind, string> = { existant: "Existant", projet: "Projet" };
+const SIDE_LABEL: Record<Side, string> = { gauche: "Gauche", droite: "Droite" };
 
-const ACI_RATIO_SOUS_REDUIT = 1;
-const ACI_RATIO_ENTRE = 2;
-const ACI_RATIO_STANDARD = 3;
-const ACI_STATUS: Record<ComparisonStatus, number> = { ameliore: 3, degrade: 1, inchange: 8 };
-
-// Distinct color per (état, côté) combination — coloring by état alone made
-// gauche and droite series render identically, so the two sides couldn't be
-// told apart in a DXF viewer even though the layers are named separately.
-const SERIES_COLOR: Record<StateKind, Record<Side, number>> = {
-  existant: { gauche: 5, droite: 4 }, // blue / cyan
-  projet: { gauche: 3, droite: 2 }, // green / yellow
-};
+const ACI_RATIO_SOUS_REDUIT = ACI.RATIO_SOUS_REDUIT;
+const ACI_RATIO_ENTRE = ACI.RATIO_ENTRE;
+const ACI_RATIO_STANDARD = ACI.RATIO_STANDARD;
 
 export interface DxfExportOptions {
   includePoints: boolean;
@@ -257,6 +251,46 @@ export function buildDxf(
         }
       }
     }
+  }
+
+  // Colors are reused across sections (e.g. ACI 3 is both "Projet Gauche"
+  // and Ratios' "≥ standard"), so a flat color→label map would conflate
+  // them — the legend lists each enabled section's own colors instead,
+  // grouped under that section's name. Placed below the drawing's actual
+  // bottom-left corner (rounded down to the nearest 50m) rather than a
+  // fixed coordinate, so it lands somewhere sensible whatever area a given
+  // export happens to cover.
+  const legendEntries: [string, number][] = [];
+  if (axisPoints && axisPoints.length >= 2) legendEntries.push(["Axe", ACI.AXE]);
+  if (options.includeExistant) {
+    legendEntries.push([`${STATE_LABEL.existant} ${SIDE_LABEL.gauche}`, SERIES_COLOR.existant.gauche]);
+    legendEntries.push([`${STATE_LABEL.existant} ${SIDE_LABEL.droite}`, SERIES_COLOR.existant.droite]);
+  }
+  if (options.includeProjet) {
+    legendEntries.push([`${STATE_LABEL.projet} ${SIDE_LABEL.gauche}`, SERIES_COLOR.projet.gauche]);
+    legendEntries.push([`${STATE_LABEL.projet} ${SIDE_LABEL.droite}`, SERIES_COLOR.projet.droite]);
+  }
+  if (options.includeRatios) {
+    legendEntries.push(["Ratios : < réduit", ACI_RATIO_SOUS_REDUIT]);
+    legendEntries.push(["Ratios : réduit ≤ largeur < standard", ACI_RATIO_ENTRE]);
+    legendEntries.push(["Ratios : ≥ standard", ACI_RATIO_STANDARD]);
+  }
+  if (options.includeComparatif && comparisonRows && comparisonRows.length > 0) {
+    legendEntries.push(["Comparatif : amélioré", ACI_STATUS.ameliore]);
+    legendEntries.push(["Comparatif : inchangé", ACI_STATUS.inchange]);
+    legendEntries.push(["Comparatif : dégradé", ACI_STATUS.degrade]);
+  }
+
+  const bbox = writer.boundingBox();
+  if (bbox && legendEntries.length > 0) {
+    const anchorX = Math.floor(bbox.minX / 50) * 50;
+    const anchorY = Math.floor(bbox.minY / 50) * 50;
+    const legendLayer = writer.ensureLayer("LEGENDE", 7);
+    const textHeight = 5;
+    const lineSpacing = 7;
+    legendEntries.forEach(([label, color], i) => {
+      writer.addText(legendLayer, anchorX, anchorY - (i + 1) * lineSpacing, textHeight, label, color);
+    });
   }
 
   return writer.toString();
