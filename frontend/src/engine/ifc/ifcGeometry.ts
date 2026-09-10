@@ -258,7 +258,14 @@ export function pavementWidthSamples(
     const stations: number[] = [];
     const offsets: number[] = [];
     for (const v of verts) {
-      const [s, o] = axis.axis.projectPoint([v[0], v[1]]);
+      const [s, o, clamped] = axis.axis.projectPoint([v[0], v[1]]);
+      // A vertex beyond the axis's own extent (the pavement solid commonly
+      // runs a little past the last real profile marker) clamps to the
+      // axis endpoint's station regardless of where it truly sits — piling
+      // up unrelated real points there and reading their offset spread as
+      // one implausibly wide ring (see projectPoint's docstring). Skip it
+      // rather than let it corrupt the first/last ring on this band.
+      if (clamped) continue;
       stations.push(s);
       offsets.push(o);
     }

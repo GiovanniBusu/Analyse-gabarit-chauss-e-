@@ -24,21 +24,34 @@ export class PolylineIndex {
     return this.cumLength[this.cumLength.length - 1];
   }
 
-  /** Returns [station, signedOffset]. offset > 0 = left of the line direction. */
-  projectPoint(point: Point): [number, number] {
+  /** Returns [station, signedOffset, clampedBeyondAxis]. offset > 0 = left of
+   * the line direction. A point whose true along-corridor position falls
+   * before the axis's first vertex or after its last has nowhere real to
+   * project to — the nearest reachable foot is clamped to that endpoint
+   * vertex (t=0 or t=1), which reports a station of exactly 0 or exactly
+   * `length` together with whatever offset that clamped foot happens to
+   * produce. That offset is not a meaningful cross-section measurement (the
+   * point isn't actually near the axis in the direction it's pointing
+   * there); clampedBeyondAxis flags this so callers building rings from
+   * many such points (pavementWidthSamples) can exclude them, rather than
+   * silently piling up unrelated real-world points at one axis endpoint and
+   * reading their offset spread as a bogus, oversized width there. */
+  projectPoint(point: Point): [number, number, boolean] {
     let bestDist2 = Infinity;
     let bestStation = 0;
     let bestOffset = 0;
+    let bestClamped = false;
     const [px, py] = point;
-    for (let i = 0; i < this.points.length - 1; i++) {
+    const lastSeg = this.points.length - 2;
+    for (let i = 0; i <= lastSeg; i++) {
       const [ax, ay] = this.points[i];
       const [bx, by] = this.points[i + 1];
       const abx = bx - ax;
       const aby = by - ay;
       const segLen2 = abx * abx + aby * aby;
       if (segLen2 < 1e-12) continue;
-      let t = ((px - ax) * abx + (py - ay) * aby) / segLen2;
-      t = Math.min(1, Math.max(0, t));
+      const rawT = ((px - ax) * abx + (py - ay) * aby) / segLen2;
+      const t = Math.min(1, Math.max(0, rawT));
       const footX = ax + t * abx;
       const footY = ay + t * aby;
       const dx = px - footX;
@@ -50,9 +63,10 @@ export class PolylineIndex {
         bestStation = this.cumLength[i] + t * segLen;
         const cross = abx * (py - ay) - aby * (px - ax);
         bestOffset = cross / segLen;
+        bestClamped = (i === 0 && rawT < 0) || (i === lastSeg && rawT > 1);
       }
     }
-    return [bestStation, bestOffset];
+    return [bestStation, bestOffset, bestClamped];
   }
 
   pointAndDirectionAtStation(stationIn: number): { point: Point; direction: Point } {
