@@ -165,6 +165,8 @@ function App() {
           <p className="help">
             Référence PK : <strong>{axisConfidence}</strong>{" "}
             {axisConfidence === "relative" && "(pas de PK réel trouvé — station relative depuis l'origine)"}
+            {axisConfidence === "profile_markers" &&
+              "(axe reconstruit à partir des marqueurs de profil du fichier — aucune valeur de PK réelle n'y est stockée, donc la station reste relative depuis l'origine)"}
           </p>
         )}
       </section>

@@ -167,25 +167,36 @@ export function buildAxisReferenceFromIfcModel(api: IfcAPI, modelID: number): Ax
     return new AxisReference(axis, 1.0, 0.0, "relative");
   }
 
-  // No IfcAlignment, no IfcPavement: this is typically a dedicated
-  // "axes + profils" reference file whose only geometry is many small
-  // cross-section marker products spread along the true corridor (see
-  // productCentroids' docstring). A single global PCA direction is a poor
-  // *ordering* key once the corridor curves enough — projecting onto one
-  // straight scalar interleaves markers from different bends, which reads
-  // as a dense zigzag once connected. Chain the markers by proximity
-  // instead (greedy nearest-neighbor): each next point is simply the
-  // closest not-yet-used marker to the current chain end, which follows a
-  // curve correctly regardless of its shape. A marker or two that's a
-  // stray outlier (not part of the sequential chain at all — e.g. an
-  // unrelated annotation far from the corridor) then shows up as one very
-  // long segment at the point the greedy walk is forced to jump to it;
-  // trimOutlierEnds cuts those off rather than let them balloon the axis
-  // length and distort every station downstream.
-  const centroids = productCentroids(api, modelID, allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT));
+  // No IfcAlignment with usable geometry, no IfcPavement: this is typically
+  // a dedicated "axes + profils" reference file whose only geometry is many
+  // small cross-section marker products spread along the true corridor (see
+  // productCentroids' docstring). IFC4X3 has a purpose-built entity for
+  // exactly this — IfcReferent with PredefinedType INTERSECTION marks a
+  // station along an alignment — and some exports (cadwork, confirmed on a
+  // real file) do emit it correctly. When present, these are authoritative:
+  // unlike a bare IfcAnnotation, an IfcReferent's very presence says "this
+  // is a station marker", so there's no need to guess which candidates are
+  // real markers vs decorative geometry (see isDecorativeSymbol) — every
+  // IfcReferent counts, and nothing else does.
+  const referentIds = allExpressIdsOfType(api, modelID, WebIFC.IFCREFERENT);
+  const markerIds = referentIds.length > 0 ? referentIds : allExpressIdsOfType(api, modelID, WebIFC.IFCPRODUCT);
+
+  // A single global PCA direction is a poor *ordering* key once the
+  // corridor curves enough — projecting onto one straight scalar
+  // interleaves markers from different bends, which reads as a dense
+  // zigzag once connected. Chain the markers by proximity instead (greedy
+  // nearest-neighbor): each next point is simply the closest not-yet-used
+  // marker to the current chain end, which follows a curve correctly
+  // regardless of its shape. A marker or two that's a stray outlier (not
+  // part of the sequential chain at all — e.g. an unrelated annotation far
+  // from the corridor) then shows up as one very long segment at the point
+  // the greedy walk is forced to jump to it; trimOutlierEnds cuts those off
+  // rather than let them balloon the axis length and distort every station
+  // downstream.
+  const centroids = productCentroids(api, modelID, markerIds);
   const chain = nearestNeighborChain(centroids);
   const trimmed = trimOutlierEnds(chain);
   const pts: Point[] = (trimmed.length >= 2 ? trimmed : chain).map(([x, y]) => [x, y]);
   const axis = new PolylineIndex(pts);
-  return new AxisReference(axis, 1.0, 0.0, "relative");
+  return new AxisReference(axis, 1.0, 0.0, referentIds.length > 0 ? "profile_markers" : "relative");
 }
